@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Conservative Yandex Market rewards client"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
-dependencies = ["curl-cffi==0.16.3", "pydantic>=2.12,<3", "pydantic-settings>=2.12,<3"]
+dependencies = ["curl-cffi==0.16.3", "pydantic>=2.12,<3", "pydantic-settings>=2.12,<3", "playwright>=1.62,<2"]
 
 [project.scripts]
 ymf = "yandex_market_farmer.cli:main"

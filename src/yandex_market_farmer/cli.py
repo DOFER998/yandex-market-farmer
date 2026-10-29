@@ -22,6 +22,9 @@ def main(argv=None):
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("import-session").add_argument("source", type=Path)
+    commands.add_parser("login").add_argument(
+        "--browser", choices=("auto", "chrome", "msedge", "chromium"), default="auto"
+    )
     for name in ("auth-check", "balance", "daily", "games", "claim-daily"):
         commands.add_parser(name)
     for name in ("levels", "claim-game"):
@@ -30,7 +33,12 @@ def main(argv=None):
     try:
         settings = Settings()
         with SessionStore(args.session or settings.session_file) as store:
-            if args.command == "import-session":
+            if args.command == "login":
+                from .browser_auth import login
+
+                store.save(login(browser=args.browser))
+                result = {"session_saved": True, "api_verified": False}
+            elif args.command == "import-session":
                 store.import_file(args.source)
                 result = {"imported": True}
             else:

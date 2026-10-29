@@ -9,7 +9,7 @@ DNS GitHub в терминале недоступен; использован в
 
 ## Первоначальный вход
 
-[`browserauthservice.go`, Login / waitForLogin / cookiesToNetscape, L59–254](https://github.com/xob0t/market-coin-farmer/blob/main/browserauthservice.go#L59-L254): открывается обычный Chromium с временным профилем; пользователь самостоятельно входит на Passport с retpath Маркета. CDP Storage.GetCookies читает в том числе HttpOnly cookies. Ожидание ограничено пятью минутами, опрос — 1,5 секунды; сигналом служит непустой Session_id. Это ещё не проверка авторизации API. Затем cookies сериализуются в Netscape. Для session cookies референс искусственно задаёт годовой expiry; Python сохраняет исходную session-семантику. Имя может извлекаться из yandex_login. При закрытии окна/таймауте вход прекращается. Python не автоматизирует ввод пароля: принимает приватный локальный Netscape-файл после самостоятельного входа.
+[`browserauthservice.go`, Login / waitForLogin / cookiesToNetscape, L59–254](https://github.com/xob0t/market-coin-farmer/blob/main/browserauthservice.go#L59-L254): открывается обычный Chromium с временным профилем; пользователь самостоятельно входит на Passport с retpath Маркета. CDP Storage.GetCookies читает в том числе HttpOnly cookies. Ожидание ограничено пятью минутами, опрос — 1,5 секунды; сигналом служит непустой Session_id. Это ещё не проверка авторизации API. Затем cookies сериализуются в Netscape. Для session cookies референс искусственно задаёт годовой expiry; Python сохраняет исходную session-семантику. Имя может извлекаться из yandex_login. При закрытии окна/таймауте вход прекращается. Python не автоматизирует ввод пароля: `uv run ymf login` открывает отдельный браузер, ждёт возврата на Маркет и автоматически сохраняет cookies. Ручной Netscape-импорт — резервный вариант.
 
 ## Хранение
 
@@ -73,3 +73,13 @@ POST отправляет JSON, Origin/Referer, sk, x-market-app-version, x-mark
 7. Ошибка сети после mutation имеет неопределённый результат; нужен durable operation journal перед автономным режимом.
 
 Интеграционные запросы к Маркету в этой работе не выполнялись: сессия не предоставлена. Все API-ответы тестов синтетические и не доказывают начисление монет.
+
+## Автоматический локальный захват сессии
+
+Команда login использует [Playwright BrowserContext.cookies](https://playwright.dev/python/docs/api/class-browsercontext#browser-context-cookies)
+для HttpOnly cookies. Видимый Chrome/Edge либо Chromium открывается с изолированным непостоянным контекстом;
+пароль, QR и 2FA вводит пользователь. Ожидается HTTPS-возврат на market.yandex.ru и Session_id,
+применимый к странице Маркета. Partitioned cookies не преобразуются в обычные; session expiry сохраняется.
+Наличие cookie не объявляется успешной API-авторизацией: для этого есть auth-check.
+Браузер закрывается при завершении/ошибке, старый jar заменяется только после успешного захвата.
+Реальный вход здесь не выполнен; автоматизация протестирована на подставных ответах браузера.
