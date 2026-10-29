@@ -113,7 +113,7 @@ APScheduler; Docker Compose с healthcheck, секретами, рестарта
 
 ## Ошибка контекста страницы
 
-Если auth-check сообщает об отсутствии desktop_version или marketFrontGlue:
+Если auth-check сообщает об отсутствии app_version или marketFrontGlue:
 
 ```bash
 uv run ymf diagnose-auth

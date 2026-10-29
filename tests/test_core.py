@@ -350,3 +350,12 @@ def test_diagnose_auth_fetches_only_html_and_returns_no_secrets():
     assert wire.calls[0][0] == "GET"
     assert "secret" not in json.dumps(result)
     assert "alice" not in json.dumps(result)
+
+
+def test_single_current_version_reaches_api_header_without_rewriting():
+    wire = Wire(
+        HTML.replace("v-desktop.1", "2026.10.release-17"),
+        {"result": {"wheelInfo": {"userInfo": {"coins": 7}}}},
+    )
+    assert MarketClient(wire, interval=0).balance() == 7
+    assert wire.calls[1][2]["headers"]["x-market-app-version"] == "2026.10.release-17"

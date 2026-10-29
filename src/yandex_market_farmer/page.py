@@ -68,6 +68,23 @@ def _desktop_versions(text: str) -> list[str]:
     return [value for value in _values(text, "-version") if re.fullmatch(r".+-desktop\..+", value)]
 
 
+def _select_version(text: str) -> str:
+    versions = _values(text, "-version")
+    desktop = set(_desktop_versions(text))
+    if len(desktop) == 1:
+        version = next(iter(desktop))
+    elif not desktop and len(versions) == 1:
+        # Live diagnostics show one version field without the historical desktop marker.
+        # Preserve the server value; do not fabricate a version or suffix.
+        version = versions[0]
+    else:
+        return ""
+    # This value becomes an HTTP header. Reject control characters and empty values.
+    if not version or version != version.strip() or not re.fullmatch(r"[ -~]+", version):
+        return ""
+    return version
+
+
 def context_diagnostics(text: str) -> dict[str, bool | int]:
     """Only fixed keys and counts/flags; never expose HTML, identifiers or token values."""
     return {
@@ -76,6 +93,7 @@ def context_diagnostics(text: str) -> dict[str, bool | int]:
         "login_present": bool(next(iter(_values(text, "login")), "")),
         "version_matches": len(_values(text, "-version")),
         "desktop_version_matches": len(_desktop_versions(text)),
+        "version_selectable": bool(_select_version(text)),
         "front_glue_present": bool(next(iter(_values(text, "marketFrontGlue")), "")),
         "front_glue_key_mentioned": "marketFrontGlue" in text,
         "desktop_marker_mentioned": "-desktop." in text,
@@ -92,12 +110,12 @@ def page_context(text: str) -> AuthContext:
     sk, login = extract("sk"), extract("login")
     if not sk or not login:
         raise AuthRequired("Authenticated profile missing; run ymf login")
-    version = next(iter(_desktop_versions(text)), "")
+    version = _select_version(text)
     glue = extract("marketFrontGlue")
     if not version or not glue:
         missing = []
         if not version:
-            missing.append("desktop_version")
+            missing.append("app_version (missing, ambiguous or unsafe)")
         if not glue:
             missing.append("marketFrontGlue")
         raise ProtocolError(
