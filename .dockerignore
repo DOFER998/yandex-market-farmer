@@ -1,0 +1,19 @@
+# Allowlist: never send local credentials/reports to the builder.
+*
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!README.md
+!alembic.ini
+!src/
+!src/**
+!scripts/
+!scripts/__init__.py
+!scripts/account.py
+!scripts/health.py
+!migrations/
+!migrations/**
+**/__pycache__/
+**/*.pyc
+!LICENSE
+!THIRD_PARTY_NOTICES.md

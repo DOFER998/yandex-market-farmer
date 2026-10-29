@@ -19,3 +19,11 @@ wheels/
 .ruff_cache/
 dist/
 .idea/
+
+# Local artifacts and editor state
+.DS_Store
+*.log
+.coverage
+htmlcov/
+*.sql
+*.dump

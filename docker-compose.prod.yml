@@ -1,0 +1,70 @@
+name: ymf-prod
+x-app: &app
+  image: "${YMF_IMAGE:-yandex-market-farmer:local}"
+  user: "${YMF_UID:-1000}:${YMF_GID:-1000}"
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs: [/tmp:rw,noexec,nosuid,size=64m]
+  env_file: .env
+  environment:
+    POSTGRES__HOST: db
+    POSTGRES__PORT: "5432"
+    MARKET__SESSION_DIR: /data/accounts
+    APP__HEARTBEAT_FILE: /tmp/ymf/heartbeat
+  volumes:
+    - type: bind
+      source: ./.secrets/accounts
+      target: /data/accounts
+      bind:
+        create_host_path: false
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  db:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES__DATABASE:-ymf}"
+      POSTGRES_USER: "${POSTGRES__USER:-ymf}"
+      POSTGRES_PASSWORD: "${POSTGRES__PASSWORD:?Run make setup-env}"
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  migrate:
+    <<: *app
+    command: [alembic, upgrade, head]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+  bot:
+    <<: *app
+    command: [python, -m, src.main]
+    restart: unless-stopped
+    stop_grace_period: 15m
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -m, scripts.health]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 3
+
+volumes:
+  postgres_data:

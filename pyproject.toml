@@ -1,20 +1,33 @@
 [project]
 name = "yandex-market-farmer"
 version = "0.1.0"
-description = "Conservative Yandex Market rewards client"
+description = "Self-hosted Telegram bot for available Yandex Market rewards"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.13,<3.14"
-dependencies = ["curl-cffi==0.16.3", "pydantic>=2.12,<3", "pydantic-settings>=2.12,<3", "playwright>=1.62,<2"]
+dependencies = [
+    "curl-cffi==0.16.3",
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2.12,<3",
+    "loguru>=0.7.3,<0.8",
+    "qrcode[pil]>=8.2,<9",
+]
 
-[project.scripts]
-ymf = "yandex_market_farmer.cli:main"
+[project.urls]
+Repository = "https://github.com/DOFER998/yandex-market-farmer"
+Issues = "https://github.com/DOFER998/yandex-market-farmer/issues"
+Documentation = "https://github.com/DOFER998/yandex-market-farmer/tree/main/docs"
+
+[project.optional-dependencies]
+browser = ["playwright>=1.62,<2"]
+server = [
+    "sqlmodel>=0.0.48,<0.1", "SQLAlchemy>=2.0,<2.1", "alembic>=1.18,<2",
+    "asyncpg>=0.31,<1", "aiogram>=3.29,<4", "APScheduler>=3.11,<4",
+]
 
 [dependency-groups]
-dev = ["pytest>=9,<10", "ruff>=0.14,<1"]
-
-[build-system]
-requires = ["hatchling>=1.31,<2"]
-build-backend = "hatchling.build"
+dev = ["pytest>=9,<10", "ruff>=0.14,<1", "aiosqlite>=0.22,<1"]
 
 [tool.ruff]
 target-version = "py313"
@@ -25,3 +38,10 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.uv]
+package = false
+
+[tool.ruff.format]
+quote-style = "single"

@@ -1,0 +1,10 @@
+# Optional source build override; production normally pulls a published image.
+services:
+  migrate:
+    image: yandex-market-farmer:local
+    build: .
+    pull_policy: never
+  bot:
+    image: yandex-market-farmer:local
+    build: .
+    pull_policy: never
