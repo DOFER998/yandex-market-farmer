@@ -25,6 +25,16 @@ def main(argv=None):
     commands.add_parser("login").add_argument(
         "--browser", choices=("auto", "chrome", "msedge", "chromium"), default="auto"
     )
+    inspection = commands.add_parser(
+        "inspect-live", help="Observe manual viewing; save redacted API report"
+    )
+    inspection.add_argument(
+        "--browser", choices=("auto", "chrome", "msedge", "chromium"), default="auto"
+    )
+    inspection.add_argument("--minutes", type=int, choices=range(1, 31), default=10)
+    inspection.add_argument(
+        "--fresh-login", action="store_true", help="Do not import saved session"
+    )
     for name in ("auth-check", "diagnose-auth", "balance", "daily", "games", "claim-daily"):
         commands.add_parser(name)
     for name in ("levels", "claim-game"):
@@ -32,6 +42,22 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         settings = Settings()
+        if args.command == "inspect-live":
+            from .inspection import inspect_live
+
+            jar = None
+            with SessionStore(args.session or settings.session_file) as store:
+                if not args.fresh_login and store.path.exists():
+                    try:
+                        jar = store.load()
+                    except SessionError:
+                        print(
+                            "Сохранённая сессия недоступна; войди вручную в открывшемся окне.",
+                            file=sys.stderr,
+                        )
+            result = inspect_live(jar=jar, browser=args.browser, minutes=args.minutes)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
         with SessionStore(args.session or settings.session_file) as store:
             if args.command == "login":
                 from .browser_auth import login
