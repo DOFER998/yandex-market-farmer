@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Run from a trusted checkout, or download this file and pass --repo OWNER/REPO.
+# One-command GitHub installer; --local is an explicit developer fallback.
 # Never source .env as shell code. No credentials are accepted as command arguments.
 set +x
 set -Eeuo pipefail
+
+DEFAULT_REPO=DOFER998/yandex-market-farmer
 
 log() { printf '\n[ymf] %s\n' "$*"; }
 die() { printf '\n[ymf] Ошибка: %s\n' "$*" >&2; exit 1; }
@@ -11,10 +13,11 @@ usage() {
     cat <<'HELP'
 Установка Yandex Market Farmer на Linux VPS (root / sudo).
 
-  sudo bash scripts/install.sh
-  sudo bash install.sh --repo OWNER/REPO --ref v0.1.0
+  bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yandex-market-farmer/main/scripts/install.sh)
+  sudo bash scripts/install.sh --local
 
-  --repo OWNER/REPO  Скачать публичный GitHub-репозиторий (иначе текущий checkout)
+  --repo OWNER/REPO  Репозиторий (по умолчанию DOFER998/yandex-market-farmer)
+  --local           Использовать checkout рядом с файлом скрипта вместо скачивания
   --ref REF         Тег/ветка GitHub; по умолчанию main
   --image IMAGE     Использовать готовый GHCR-образ вместо сборки из исходников
   --help            Показать справку без изменения системы
@@ -122,6 +125,15 @@ guard_existing_stack() {
     fi
 }
 
+fetch_source() {
+    local repo=$1 ref=$2
+    INSTALL_TEMP=$(mktemp -d)
+    log "Получаю GitHub $repo, ref $ref."
+    git -c core.hooksPath=/dev/null clone --depth 1 --branch "$ref" --single-branch \
+        "https://github.com/$repo.git" "$INSTALL_TEMP/source"
+    SOURCE_DIR=$INSTALL_TEMP/source
+}
+
 prepare_source() {
     local source=$1 target=$2 item
     [[ ! -L "$target" ]] || die 'Каталог установки не должен быть symlink'
@@ -152,10 +164,12 @@ prepare_source() {
 }
 
 main() {
-    local repo='' ref=main image='' target=/opt/yandex-market-farmer source token='' owner='' uid gid
+    local repo=$DEFAULT_REPO ref=main image='' target=/opt/yandex-market-farmer
+    local source token='' owner='' uid gid local_source=false
     while (($#)); do
         case "$1" in
             --help|-h) usage; return ;;
+            --local) local_source=true; shift ;;
             --repo|--ref|--image)
                 (($# >= 2)) || die "Нет значения для $1"
                 case "$1" in
@@ -167,7 +181,7 @@ main() {
             *) die "Неизвестный параметр: $1" ;;
         esac
     done
-    [[ -z "$repo" ]] || validate_repo "$repo" || die 'Укажите GitHub-репозиторий в формате OWNER/REPO'
+    validate_repo "$repo" || die 'Укажите GitHub-репозиторий в формате OWNER/REPO'
     [[ "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$ref" != *..* ]] || die 'Недопустимый Git ref'
     [[ -z "$image" || "$image" =~ ^ghcr\.io/[a-z0-9._/-]+(:[a-zA-Z0-9._-]+|@sha256:[a-f0-9]{64})$ ]] || die 'Нужен GHCR image с явным тегом или digest'
     [[ $(uname -s) == Linux ]] || die 'Установщик предназначен для Linux VPS'
@@ -189,13 +203,14 @@ main() {
     flock -n 9 || die 'Другой установщик уже работает'
     install_dependencies
     guard_existing_stack "$target"
-    source=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-    if [[ ! -e "$target/.ymf-install" && -n "$repo" ]]; then
-        INSTALL_TEMP=$(mktemp -d)
-        log "Получаю GitHub $repo, ref $ref."
-        git -c core.hooksPath=/dev/null clone --depth 1 --branch "$ref" --single-branch \
-            "https://github.com/$repo.git" "$INSTALL_TEMP/source"
-        source=$INSTALL_TEMP/source
+    if [[ -e "$target/.ymf-install" ]]; then
+        source=$target
+    elif [[ "$local_source" == true ]]; then
+        [[ -f "${BASH_SOURCE[0]}" ]] || die '--local требует обычный файл скрипта внутри checkout'
+        source=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+    else
+        fetch_source "$repo" "$ref"
+        source=$SOURCE_DIR
     fi
     prepare_source "$source" "$target"
     cd -- "$target"

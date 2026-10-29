@@ -109,13 +109,13 @@ Daily и игровые награды — независимые операци
 
 ## VPS и Docker
 
-Автоустановка из скачанного проекта на Ubuntu/Debian:
+Установка одной командой на Ubuntu/Debian **от root** — вручную клонировать репозиторий не нужно:
 
 ```bash
-sudo bash scripts/install.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yandex-market-farmer/main/scripts/install.sh)
 ```
 
-Скрипт установит Docker, запросит настройки и соберёт проект в `/opt/yandex-market-farmer`.
+Скрипт сам скачает исходники с GitHub, установит Docker, запросит настройки и соберёт проект в `/opt/yandex-market-farmer`.
 [Установка прямо из GitHub и подробности работы скрипта →](docs/deployment.md#автоматическая-установка-на-vps)
 
 

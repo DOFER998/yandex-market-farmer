@@ -18,21 +18,36 @@ Compose запускает только БД, бот работает из `.ven
 ## Автоматическая установка на VPS
 
 Поддерживаются Ubuntu 22.04/24.04/26.04 и Debian 12/13 с systemd, архитектуры amd64/arm64.
-Из уже скачанного проекта:
+Выполните **от root** одну команду, без предварительного клонирования:
 
 ```bash
-sudo bash scripts/install.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yandex-market-farmer/main/scripts/install.sh)
 ```
 
-Для установки непосредственно из публичного GitHub-репозитория скачайте скрипт из выбранного
-релиза, просмотрите его и запустите. Используйте **существующий** тег вместо `v0.1.0`. До первого релиза можно явно указать `main` вместо тега в обоих местах.
+Если вошли под обычным пользователем с sudo:
 
 ```bash
-curl --fail --location --output install.sh \
-  https://raw.githubusercontent.com/DOFER998/yandex-market-farmer/v0.1.0/scripts/install.sh
+sudo bash -c 'bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yandex-market-farmer/main/scripts/install.sh)'
+```
+
+Репозиторий уже задан в скрипте: `DOFER998/yandex-market-farmer`, ветка `main`.
+Git установится автоматически, исходники скачаются во временный каталог и будут размещены
+в `/opt/yandex-market-farmer`. На входе нужны только токен бота и Telegram ID.
+Для определённого существующего релиза добавьте `--ref vX.Y.Z` после закрывающей скобки.
+
+<details>
+<summary>Просмотр скрипта перед запуском или установка из локальных исходников</summary>
+
+```bash
+curl -fsSL -o install.sh https://raw.githubusercontent.com/DOFER998/yandex-market-farmer/main/scripts/install.sh
 less install.sh
-sudo bash install.sh --repo DOFER998/yandex-market-farmer --ref v0.1.0
+sudo bash install.sh
 ```
+
+Для разработчиков, из локального checkout: `sudo bash scripts/install.sh --local`.
+Для форка доступен параметр `--repo OWNER/REPO`.
+
+</details>
 
 Если на чистом сервере нет `curl`, сначала установите его: `sudo apt-get update && sudo apt-get install -y curl`.
 Сам скрипт также устанавливает необходимые утилиты. Не запускайте неизвестные копии установщика от root.
@@ -65,8 +80,8 @@ Docker управляет собственными сетевыми правил
 Опционально можно использовать опубликованный образ GitHub Container Registry:
 
 ```bash
-sudo bash install.sh --repo DOFER998/yandex-market-farmer --ref v0.1.0 \
-  --image ghcr.io/dofer998/yandex-market-farmer:0.1.0
+bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yandex-market-farmer/main/scripts/install.sh) \
+  --ref v0.1.0 --image ghcr.io/dofer998/yandex-market-farmer:0.1.0
 ```
 
 Тег исходников и версия образа должны соответствовать друг другу. Для private GHCR предварительно

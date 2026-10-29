@@ -143,3 +143,27 @@ def test_existing_stack_in_other_directory_is_not_touched(tmp_path):
         str(tmp_path),
     )
     assert result.returncode != 0
+
+
+def test_streamed_installer_has_builtin_repository():
+    result = subprocess.run(
+        ['bash', '-c', 'bash <(cat "$1") --help', 'test', str(INSTALLER)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert 'DOFER998/yandex-market-farmer' in result.stdout
+
+
+def test_fetch_source_downloads_default_repository_without_local_checkout(tmp_path):
+    result = shell(
+        'git() { printf "%s\\n" "$@" > "$CAPTURE"; }; '
+        'export CAPTURE="$1"; fetch_source "$DEFAULT_REPO" main; '
+        '[[ "$SOURCE_DIR" == "$INSTALL_TEMP/source" ]]; rm -rf "$INSTALL_TEMP"',
+        str(tmp_path / 'git-args'),
+    )
+    assert result.returncode == 0, result.stderr
+    args = (tmp_path / 'git-args').read_text().splitlines()
+    assert 'https://github.com/DOFER998/yandex-market-farmer.git' in args
+    assert args[args.index('--branch') + 1] == 'main'
