@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command GitHub installer; --local is an explicit developer fallback.
+# Install release Compose + a prebuilt GHCR image; no source checkout or build.
 # Never source .env as shell code. No credentials are accepted as command arguments.
 set +x
 set -Eeuo pipefail
@@ -14,16 +14,14 @@ usage() {
 Установка Yandex Market Farmer на Linux VPS (root / sudo).
 
   bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yandex-market-farmer/main/scripts/install.sh)
-  sudo bash scripts/install.sh --local
+  bash install.sh --version v0.1.0
 
   --repo OWNER/REPO  Репозиторий (по умолчанию DOFER998/yandex-market-farmer)
-  --local           Использовать checkout рядом с файлом скрипта вместо скачивания
-  --ref REF         Тег/ветка GitHub; по умолчанию main
-  --image IMAGE     Использовать готовый GHCR-образ вместо сборки из исходников
+  --version VERSION Релиз vX.Y.Z; по умолчанию latest (последний стабильный)
   --help            Показать справку без изменения системы
 
 Ubuntu 22.04/24.04/26.04, Debian 12/13; amd64/arm64; systemd.
-Каталог: /opt/yandex-market-farmer. По умолчанию сборка на VPS.
+Каталог: /opt/yandex-market-farmer. Готовый образ скачивается из GHCR.
 Токен вводится скрыто через терминал. Повторный запуск сохраняет .env и данные.
 Установщик не обновляет существующую установку; обновление описано в docs/deployment.md.
 HELP
@@ -68,11 +66,10 @@ install_dependencies() {
     local package installed conflict=false
     log 'Устанавливаю необходимые утилиты.'
     apt-get update -qq
-    apt-get install -y --no-install-recommends ca-certificates curl git make openssl
+    apt-get install -y --no-install-recommends ca-certificates curl jq openssl
     if command -v docker >/dev/null 2>&1; then
         log 'Docker уже установлен; сохраняю существующую установку.'
         docker compose version >/dev/null || die 'Нужен Docker Compose plugin. Установите его для своей версии Docker и повторите запуск.'
-        docker buildx version >/dev/null || die 'Нужен Docker Buildx plugin для сборки. Установите его и повторите запуск.'
     else
         # Never remove a potentially active container runtime on an existing VPS.
         for package in docker.io docker-compose docker-compose-v2 docker-doc docker-buildx podman-docker containerd runc; do
@@ -101,7 +98,7 @@ Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/ymf-docker.asc
 SOURCES
         apt-get update -qq
-        apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-compose-plugin
     fi
     local compose_version major minor
     compose_version=$(docker compose version --short)
@@ -125,65 +122,80 @@ guard_existing_stack() {
     fi
 }
 
-fetch_source() {
-    local repo=$1 ref=$2
-    INSTALL_TEMP=$(mktemp -d)
-    log "Получаю GitHub $repo, ref $ref."
-    git -c core.hooksPath=/dev/null clone --depth 1 --branch "$ref" --single-branch \
-        "https://github.com/$repo.git" "$INSTALL_TEMP/source"
-    SOURCE_DIR=$INSTALL_TEMP/source
+download_file() {
+    curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+        --retry 3 --connect-timeout 15 --max-time 120 "$1" -o "$2"
 }
 
-prepare_source() {
-    local source=$1 target=$2 item
-    [[ ! -L "$target" ]] || die 'Каталог установки не должен быть symlink'
-    if [[ -e "$target/.ymf-install" ]]; then
-        log 'Использую существующие файлы установки; обновление кода не выполняется.'
+validate_image() {
+    local expected
+    expected="ghcr.io/$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')@sha256:"
+    [[ "$2" == "$expected"* && "${2#"$expected"}" =~ ^[a-f0-9]{64}$ ]]
+}
+
+prepare_runtime() {
+    local repo=$1 version=$2 target=$3 base
+    [[ ! -L "$target" && ! -L "$target/.ymf-install" ]] || die 'Symlink в каталоге установки запрещён'
+    if [[ -f "$target/.ymf-install" ]]; then
+        [[ $(head -n 1 "$target/.ymf-install") == image-runtime-v1 ]] || die 'Найдена установка из исходников. Перенос выполняется вручную с сохранением .env и сессий.'
+        IMAGE=$(sed -n '3p' "$target/.ymf-install")
+        validate_image "$repo" "$IMAGE" || die 'Повреждена запись версии установки'
+        log 'Существующие Compose, .env и данные сохраняются; обновление версии не выполняется.'
         return
     fi
     if [[ -d "$target" && -n "$(ls -A "$target")" ]]; then
         die "$target уже содержит файлы другой установки. Автоматическое перезаписывание запрещено."
     fi
-    [[ -f "$source/pyproject.toml" && -f "$source/docker-compose.prod.yml" ]] || die 'Не найден исходный проект'
     INSTALL_STAGE=$(mktemp -d "${target}.stage.XXXXXX")
-    # An allowlist excludes .env, .git, .secrets, reports and local virtual environments.
-    for item in src scripts migrations docs pyproject.toml uv.lock README.md Makefile Dockerfile \
-        .dockerignore .env.example LICENSE THIRD_PARTY_NOTICES.md alembic.ini docker-compose.prod.yml docker-compose.build.yml; do
-        [[ -e "$source/$item" && ! -L "$source/$item" ]] || die "Отсутствует обычный файл/каталог: $item"
-        if [[ -d "$source/$item" ]] && [[ -n "$(find "$source/$item" -type l -print -quit)" ]]; then
-            die "Ссылки внутри $item не поддерживаются установщиком"
-        fi
-        cp -R -- "$source/$item" "$INSTALL_STAGE/$item"
-    done
-    find "$INSTALL_STAGE" -type d -exec chmod 755 {} +
-    find "$INSTALL_STAGE" -type f -exec chmod 644 {} +
-    touch "$INSTALL_STAGE/.ymf-install"
+    if [[ "$version" == latest ]]; then
+        download_file "https://api.github.com/repos/$repo/releases/latest" "$INSTALL_STAGE/release.json"
+        version=$(jq -er '.tag_name | strings' "$INSTALL_STAGE/release.json")
+        rm "$INSTALL_STAGE/release.json"
+    fi
+    [[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || die 'Нужен стабильный релиз vX.Y.Z'
+    base="https://github.com/$repo/releases/download/$version"
+    log "Скачиваю Compose и ссылку на готовый образ релиза $version."
+    download_file "$base/docker-compose.prod.yml" "$INSTALL_STAGE/docker-compose.prod.yml"
+    download_file "$base/image.ref" "$INSTALL_STAGE/image.ref"
+    IMAGE=$(cat "$INSTALL_STAGE/image.ref")
+    validate_image "$repo" "$IMAGE" || die 'Релиз должен содержать digest образа выбранного репозитория'
+    rm "$INSTALL_STAGE/image.ref"
+    printf 'image-runtime-v1\n%s\n%s\n' "$version" "$IMAGE" > "$INSTALL_STAGE/.ymf-install"
+    chmod 755 "$INSTALL_STAGE"
+    chmod 644 "$INSTALL_STAGE/docker-compose.prod.yml"
+    chmod 600 "$INSTALL_STAGE/.ymf-install"
     [[ ! -d "$target" ]] || rmdir -- "$target"
     mv -- "$INSTALL_STAGE" "$target"
     INSTALL_STAGE=''
 }
 
+deploy_runtime() {
+    docker compose -f docker-compose.prod.yml config --quiet
+    docker compose -f docker-compose.prod.yml pull
+    docker compose -f docker-compose.prod.yml stop bot
+    docker compose -f docker-compose.prod.yml run --rm migrate
+    docker compose -f docker-compose.prod.yml up -d --no-build --wait
+    docker compose -f docker-compose.prod.yml ps
+}
+
 main() {
-    local repo=$DEFAULT_REPO ref=main image='' target=/opt/yandex-market-farmer
-    local source token='' owner='' uid gid local_source=false
+    local repo=$DEFAULT_REPO version=latest target=/opt/yandex-market-farmer
+    local token='' owner='' uid gid
     while (($#)); do
         case "$1" in
             --help|-h) usage; return ;;
-            --local) local_source=true; shift ;;
-            --repo|--ref|--image)
+            --repo|--version)
                 (($# >= 2)) || die "Нет значения для $1"
                 case "$1" in
                     --repo) repo=$2 ;;
-                    --ref) ref=$2 ;;
-                    --image) image=$2 ;;
+                    --version) version=$2 ;;
                 esac
                 shift 2 ;;
             *) die "Неизвестный параметр: $1" ;;
         esac
     done
     validate_repo "$repo" || die 'Укажите GitHub-репозиторий в формате OWNER/REPO'
-    [[ "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$ref" != *..* ]] || die 'Недопустимый Git ref'
-    [[ -z "$image" || "$image" =~ ^ghcr\.io/[a-z0-9._/-]+(:[a-zA-Z0-9._-]+|@sha256:[a-f0-9]{64})$ ]] || die 'Нужен GHCR image с явным тегом или digest'
+    [[ "$version" == latest || "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || die 'Версия должна быть latest или vX.Y.Z'
     [[ $(uname -s) == Linux ]] || die 'Установщик предназначен для Linux VPS'
     ((EUID == 0)) || die 'Запустите установщик через sudo bash или от root'
     [[ -f /etc/os-release ]] || die 'Нет /etc/os-release'
@@ -203,16 +215,7 @@ main() {
     flock -n 9 || die 'Другой установщик уже работает'
     install_dependencies
     guard_existing_stack "$target"
-    if [[ -e "$target/.ymf-install" ]]; then
-        source=$target
-    elif [[ "$local_source" == true ]]; then
-        [[ -f "${BASH_SOURCE[0]}" ]] || die '--local требует обычный файл скрипта внутри checkout'
-        source=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-    else
-        fetch_source "$repo" "$ref"
-        source=$SOURCE_DIR
-    fi
-    prepare_source "$source" "$target"
+    prepare_runtime "$repo" "$version" "$target"
     cd -- "$target"
     [[ ! -L .env && ! -L .secrets && ! -L .secrets/accounts ]] || die 'Symlink для секретов запрещён'
     if [[ ! -e .env ]]; then
@@ -228,31 +231,23 @@ main() {
         uid=$(id -u ymf); gid=$(id -g ymf)
         ((uid != 0)) || die 'Пользователь ymf не должен быть root'
         install -d -m 0700 -o "$uid" -g "$gid" .secrets .secrets/accounts
-        write_env .env "$token" "$owner" "$uid" "$gid" "$image"
+        write_env .env "$token" "$owner" "$uid" "$gid" "$IMAGE"
         unset token
     else
         [[ -f .env ]] || die '.env не является обычным файлом'
-        [[ -z "$image" ]] || die 'Для существующей установки задавайте YMF_IMAGE в .env; файл не перезаписан'
         [[ -d .secrets/accounts ]] || die 'Каталог сессий отсутствует; восстановите его перед запуском'
         log 'Сохраняю .env, права каталога сессий и данные существующей установки.'
     fi
     chmod 600 .env
-    docker compose -f docker-compose.prod.yml config --quiet
-    # Read only the presence of the image setting; never evaluate .env in bash.
-    if grep -Eq '^YMF_IMAGE=.+$' .env; then
-        make docker-deploy
-    else
-        make docker-run-prod
-    fi
-    docker compose -f docker-compose.prod.yml ps
+    grep -Eq '^YMF_IMAGE=.+$' .env || die 'В .env отсутствует YMF_IMAGE; сборка на VPS не поддерживается'
+    deploy_runtime
     log 'Установка завершена. Откройте бота → Добавить аккаунт → Подключение → Войти через QR.'
-    printf 'Каталог: %s\nЛоги: cd %s && sudo make docker-logs\n' "$target" "$target"
+    printf 'Каталог: %s\nЛоги: cd %s && sudo docker compose -f docker-compose.prod.yml logs -f bot\n' "$target" "$target"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    INSTALL_TEMP=''
     INSTALL_STAGE=''
-    trap '[[ -z "$INSTALL_TEMP" ]] || rm -rf -- "$INSTALL_TEMP"; [[ -z "$INSTALL_STAGE" ]] || rm -rf -- "$INSTALL_STAGE"' EXIT
+    trap '[[ -z "$INSTALL_STAGE" ]] || rm -rf -- "$INSTALL_STAGE"' EXIT
     trap 'printf "\n[ymf] Установка прервана на строке %s. Данные не удалены; исправьте ошибку и повторите запуск.\n" "$LINENO" >&2' ERR
     main "$@"
 fi

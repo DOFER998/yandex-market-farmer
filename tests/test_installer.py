@@ -82,50 +82,42 @@ def test_invalid_repository_is_rejected():
     assert result.returncode != 0
 
 
-def test_copy_does_not_include_local_secrets_and_rerun_preserves_install(tmp_path):
-    source = tmp_path / 'source'
-    source.mkdir()
-    for name in ['src', 'scripts', 'migrations', 'docs']:
-        (source / name).mkdir()
-        (source / name / 'example').write_text('original')
-    for name in [
-        'LICENSE',
-        'THIRD_PARTY_NOTICES.md',
-        'pyproject.toml',
-        'uv.lock',
-        'README.md',
-        'Makefile',
-        'Dockerfile',
-        '.dockerignore',
-        '.env.example',
-        'alembic.ini',
-        'docker-compose.prod.yml',
-        'docker-compose.build.yml',
-    ]:
-        (source / name).write_text('example')
-    (source / '.env').write_text('private-token')
-    (source / '.secrets').mkdir()
-    (source / '.secrets' / 'cookies').write_text('secret-session')
-    target = tmp_path / 'target'
-    result = shell('prepare_source "$1" "$2"', str(source), str(target))
+def test_runtime_install_downloads_only_compose_and_pinned_image(tmp_path):
+    result = shell(
+        'download_file() { case "$1" in '
+        '*docker-compose.prod.yml) printf "name: ymf-prod\\n" > "$2" ;; '
+        '*image.ref) printf "ghcr.io/dofer998/yandex-market-farmer@sha256:%064d\\n" 0 > "$2" ;; '
+        '*) return 1 ;; esac; }; '
+        'prepare_runtime "$DEFAULT_REPO" v0.1.0 "$1"; '
+        'printf "saved-token" > "$1/.env"; '
+        'download_file() { return 1; }; '
+        'prepare_runtime "$DEFAULT_REPO" latest "$1"',
+        str(tmp_path / 'runtime'),
+    )
     assert result.returncode == 0, result.stderr
-    assert not (target / '.env').exists()
-    assert not (target / '.secrets').exists()
-    (target / '.env').write_text('saved-token')
-    (source / 'src' / 'example').write_text('new')
-    result = shell('prepare_source "$1" "$2"', str(source), str(target))
-    assert result.returncode == 0, result.stderr
+    target = tmp_path / 'runtime'
+    assert {p.name for p in target.iterdir()} == {'.env', '.ymf-install', 'docker-compose.prod.yml'}
     assert (target / '.env').read_text() == 'saved-token'
-    assert (target / 'src' / 'example').read_text() == 'original'
+    assert 'v0.1.0' in (target / '.ymf-install').read_text()
 
 
 def test_refuses_to_replace_unrelated_directory(tmp_path):
     target = tmp_path / 'existing'
     target.mkdir()
     (target / 'keep').write_text('important')
-    result = shell('prepare_source "$1" "$2"', str(tmp_path), str(target))
+    result = shell('prepare_runtime "$DEFAULT_REPO" v0.1.0 "$1"', str(target))
     assert result.returncode != 0
     assert (target / 'keep').read_text() == 'important'
+
+
+def test_image_reference_must_be_digest_of_selected_repository(tmp_path):
+    result = shell(
+        'download_file() { printf "ghcr.io/other/app:latest\\n" > "$2"; }; '
+        'prepare_runtime "$DEFAULT_REPO" v0.1.0 "$1"',
+        str(tmp_path / 'runtime'),
+    )
+    assert result.returncode != 0
+    assert not (tmp_path / 'runtime').exists()
 
 
 def test_existing_database_requires_original_config(tmp_path):
@@ -156,14 +148,28 @@ def test_streamed_installer_has_builtin_repository():
     assert 'DOFER998/yandex-market-farmer' in result.stdout
 
 
-def test_fetch_source_downloads_default_repository_without_local_checkout(tmp_path):
+def test_runtime_deploy_pulls_before_stopping_and_never_builds(tmp_path):
     result = shell(
-        'git() { printf "%s\\n" "$@" > "$CAPTURE"; }; '
-        'export CAPTURE="$1"; fetch_source "$DEFAULT_REPO" main; '
-        '[[ "$SOURCE_DIR" == "$INSTALL_TEMP/source" ]]; rm -rf "$INSTALL_TEMP"',
-        str(tmp_path / 'git-args'),
+        'export CAPTURE="$1"; docker() { printf "%s\\n" "$*" >> "$CAPTURE"; }; deploy_runtime',
+        str(tmp_path / 'calls'),
     )
     assert result.returncode == 0, result.stderr
-    args = (tmp_path / 'git-args').read_text().splitlines()
-    assert 'https://github.com/DOFER998/yandex-market-farmer.git' in args
-    assert args[args.index('--branch') + 1] == 'main'
+    calls = (tmp_path / 'calls').read_text().splitlines()
+    assert calls == [
+        'compose -f docker-compose.prod.yml config --quiet',
+        'compose -f docker-compose.prod.yml pull',
+        'compose -f docker-compose.prod.yml stop bot',
+        'compose -f docker-compose.prod.yml run --rm migrate',
+        'compose -f docker-compose.prod.yml up -d --no-build --wait',
+        'compose -f docker-compose.prod.yml ps',
+    ]
+
+
+def test_legacy_source_install_is_not_silently_replaced(tmp_path):
+    target = tmp_path / 'old'
+    target.mkdir()
+    (target / '.ymf-install').touch()
+    (target / '.env').write_text('keep')
+    result = shell('prepare_runtime "$DEFAULT_REPO" latest "$1"', str(target))
+    assert result.returncode != 0
+    assert (target / '.env').read_text() == 'keep'

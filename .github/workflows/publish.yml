@@ -101,13 +101,18 @@ jobs:
       IMAGE: ${{ needs.publish.outputs.image }}
       DIGEST: ${{ needs.publish.outputs.digest }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Create release after successful image publication
         run: |
           # Markdown backticks are literal.
           # shellcheck disable=SC2016
           printf 'Docker image: `%s@%s`\n\nSee docs/deployment.md for deployment instructions.\n' "$IMAGE" "$DIGEST" > "$RUNNER_TEMP/release.md"
+          printf '%s@%s\n' "$IMAGE" "$DIGEST" > "$RUNNER_TEMP/image.ref"
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
-            echo 'Release already exists; preserving its notes.'
+            gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | contains(["docker-compose.prod.yml", "image.ref"])' | grep -qx true
+            echo 'Release already exists with deployment assets; preserving it.'
           else
-            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --generate-notes --notes-file "$RUNNER_TEMP/release.md" --latest=false
+            gh release create "$RELEASE_TAG" docker-compose.prod.yml "$RUNNER_TEMP/image.ref" --verify-tag --title "$RELEASE_TAG" --generate-notes --notes-file "$RUNNER_TEMP/release.md" --latest=true
           fi
