@@ -79,7 +79,12 @@ POST отправляет JSON, Origin/Referer, sk, x-market-app-version, x-mark
 Команда login использует [Playwright BrowserContext.cookies](https://playwright.dev/python/docs/api/class-browsercontext#browser-context-cookies)
 для HttpOnly cookies. Видимый Chrome/Edge либо Chromium открывается с изолированным непостоянным контекстом;
 пароль, QR и 2FA вводит пользователь. Ожидается HTTPS-возврат на market.yandex.ru и Session_id,
-применимый к странице Маркета. Partitioned cookies не преобразуются в обычные; session expiry сохраняется.
+применимый к странице Маркета, и полный авторизованный HTML-контекст. Partitioned cookies не преобразуются в обычные; session expiry сохраняется.
 Наличие cookie не объявляется успешной API-авторизацией: для этого есть auth-check.
 Браузер закрывается при завершении/ошибке, старый jar заменяется только после успешного захвата.
 Реальный вход здесь не выполнен; автоматизация протестирована на подставных ответах браузера.
+
+Детектор challenge не реагирует на строки smartcaptcha в JavaScript/ссылках. Он распознаёт
+активные формы checkcaptcha/showcaptcha, challenge URL и известные заголовки страницы проверки.
+Неизвестные варианты всё равно отклоняются, если отсутствует валидный HTML/API-контекст.
+Список признаков не претендует на полную поддержку всех вариантов антибот-защиты.

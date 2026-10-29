@@ -114,7 +114,7 @@ def test_http_failures_stop_without_retry(status, error):
 
 
 def test_html_challenge_stops():
-    c = MarketClient(Wire("<html>showcaptcha</html>"), interval=0)
+    c = MarketClient(Wire('<html><form action="/checkcaptcha"></form></html>'), interval=0)
     with pytest.raises(AccessDenied):
         c.check_auth()
 
@@ -303,3 +303,39 @@ def test_nonfinite_retry_after_uses_safe_default(monkeypatch):
     with pytest.raises(RateLimited) as error:
         c.balance()
     assert error.value.retry_after == 60
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        '<script src="https://smartcaptcha.yandexcloud.net/captcha.js"></script>',
+        '<script>const endpoint="/showcaptcha";</script>',
+        '<a href="/captcha/help">Help</a>',
+    ],
+)
+def test_captcha_library_reference_is_not_a_challenge(extra):
+    c = MarketClient(Wire(HTML + extra), interval=0)
+    assert c.check_auth().login == "alice"
+
+
+def test_active_captcha_form_blocks_even_with_stale_context():
+    c = MarketClient(
+        Wire(HTML + '<form action="/checkcaptcha"><input name="rep"></form>'), interval=0
+    )
+    with pytest.raises(AccessDenied):
+        c.check_auth()
+
+
+def test_redirect_to_challenge_is_not_misreported_as_expired_session():
+    wire = Wire((302, ""))
+    original = wire.request
+
+    def request(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result.headers["Location"] = "/showcaptcha?secret=value"
+        return result
+
+    wire.request = request
+    with pytest.raises(AccessDenied) as error:
+        MarketClient(wire, interval=0).check_auth()
+    assert "secret" not in str(error.value)

@@ -9,7 +9,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .client import PAGE
-from .errors import SessionError
+from .errors import AccessDenied, AuthRequired, ProtocolError, SessionError
+from .page import challenge_url, page_context
 from .session import allowed_domain
 
 LOGIN_URL = "https://passport.yandex.ru/auth?retpath=https%3A%2F%2Fmarket.yandex.ru%2Fkolesoprizov"
@@ -51,18 +52,30 @@ def browser_cookies_to_jar(cookies) -> MozillaCookieJar:
 
 
 def wait_for_session(context, page, *, timeout=300) -> MozillaCookieJar:
+    from playwright.sync_api import Error
+
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if page.is_closed():
             raise SessionError("Login window closed before authentication")
         # Wait for Passport's return to Market, not merely creation of a Passport cookie.
         url = urlsplit(page.url)
-        if url.scheme == "https" and url.hostname == "market.yandex.ru":
+        if (
+            url.scheme == "https"
+            and url.hostname == "market.yandex.ru"
+            and not challenge_url(page.url)
+        ):
             applicable = browser_cookies_to_jar(context.cookies([PAGE]))
             if any(c.name == "Session_id" and c.value for c in applicable):
-                return browser_cookies_to_jar(context.cookies())
+                try:
+                    page_context(page.content())
+                except (AccessDenied, AuthRequired, ProtocolError, Error):
+                    # Navigation may still be in flight; keep window available for the user.
+                    pass
+                else:
+                    return browser_cookies_to_jar(context.cookies())
         page.wait_for_timeout(500)
-    raise SessionError("Login timed out after five minutes; run ymf login again")
+    raise SessionError("Login timed out: authenticated Market page not ready; run ymf login again")
 
 
 def _channel(browser):

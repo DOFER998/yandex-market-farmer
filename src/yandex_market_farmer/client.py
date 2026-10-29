@@ -2,7 +2,6 @@
 
 import json
 import math
-import re
 import threading
 import time
 from datetime import UTC, datetime
@@ -22,6 +21,7 @@ from .errors import (
     UncertainClaim,
 )
 from .models import AuthContext, DailyClaim, Game, GameClaim, Hub, Level, Mission
+from .page import challenge_page, challenge_url, page_context
 
 ORIGIN = "https://market.yandex.ru"
 PATH = "/kolesoprizov?track=menu"
@@ -119,6 +119,9 @@ class MarketClient:
         if status == 403:
             self._blocked = True
             raise AccessDenied("HTTP 403: access denied; no bypass attempted")
+        if 300 <= status < 400 and challenge_url(response.headers.get("Location", "")):
+            self._blocked = True
+            raise AccessDenied("Redirected to challenge; resolve manually in browser")
         if status == 401 or 300 <= status < 400:
             self._context = None
             raise AuthRequired("Session rejected or redirected; sign in locally again")
@@ -144,9 +147,9 @@ class MarketClient:
                 raise UncertainClaim("Claim outcome unknown after HTTP error")
             raise TransportError(f"Unexpected HTTP status {status}")
         text = response.text
-        if re.search(r"(?:showcaptcha|smartcaptcha|/captcha)", text, re.I):
+        if challenge_page(text):
             self._blocked = True
-            raise AccessDenied("Challenge detected; resolve manually in browser")
+            raise AccessDenied("Active challenge page; resolve manually in browser")
         return text
 
     def check_auth(self, *, force=True) -> AuthContext:
@@ -167,31 +170,7 @@ class MarketClient:
                 },
             )
 
-            def extract(key):
-                match = re.search(r'"' + re.escape(key) + r'"\s*:\s*("(?:[^"\\]|\\.)*")', text)
-                if not match:
-                    return ""
-                try:
-                    return json.loads(match[1])
-                except ValueError:
-                    raise ProtocolError("Invalid page context") from None
-
-            sk, login = extract("sk"), extract("login")
-            if not sk or not login:
-                raise AuthRequired("Authenticated profile missing; sign in locally again")
-            version, glue = extract("-version"), extract("marketFrontGlue")
-            if "-desktop." not in version or not glue:
-                raise ProtocolError("Market page context missing or changed")
-            self._context = _validate(
-                AuthContext,
-                {
-                    "sk": sk,
-                    "login": login,
-                    "version": version,
-                    "glue": glue,
-                    "language": extract("lang") or "ru",
-                },
-            )
+            self._context = page_context(text)
             self._auth_at = time.monotonic()
             return self._context
 

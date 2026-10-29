@@ -39,6 +39,12 @@ def test_wait_requires_market_return_and_session_cookie():
         url = "https://passport.yandex.ru/auth"
         waits = 0
 
+        def content(self):
+            return (
+                '<script>{"sk":"s","login":"a","-version":"v-desktop.1",'
+                '"marketFrontGlue":"g"}</script>'
+            )
+
         def is_closed(self):
             return False
 
@@ -126,3 +132,30 @@ def test_failed_login_preserves_previous_session(tmp_path, monkeypatch):
     assert main(["--session", str(path), "login"]) == 2
     with SessionStore(path) as store:
         assert next(iter(store.load())).value == "old"
+
+
+@pytest.mark.parametrize("path", ["/showcaptcha", "/kolesoprizov"])
+def test_login_does_not_capture_session_on_active_challenge(path):
+    class Page:
+        url = "https://market.yandex.ru" + path
+        waits = 0
+
+        def is_closed(self):
+            return False
+
+        def content(self):
+            if self.waits == 0:
+                return '<form action="/checkcaptcha"></form>'
+            return (
+                '<script>{"sk":"s","login":"a","-version":"v-desktop.1",'
+                '"marketFrontGlue":"g"}</script>'
+            )
+
+        def wait_for_timeout(self, _):
+            self.waits += 1
+            self.url = "https://market.yandex.ru/kolesoprizov"
+
+    page = Page()
+    context = SimpleNamespace(cookies=lambda urls=None: [cookie()])
+    wait_for_session(context, page, timeout=2)
+    assert page.waits == 1
