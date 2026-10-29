@@ -15,5 +15,8 @@
 
 ### Подготовка публикации
 
+- Обновлены Pillow до 13.0.0 и aiohttp до 3.14.5 по предупреждениям Dependabot.
+- Исправлено экранирование PostgreSQL healthcheck для GitHub Actions runner.
+
 - CI с PostgreSQL и проверкой Docker runtime; релизы по тегам и образы GHCR для amd64/arm64.
 - Инструкции установки, обновления, резервного копирования и разработки.
