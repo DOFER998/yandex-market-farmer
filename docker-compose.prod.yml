@@ -6,7 +6,7 @@ x-app: &app
   read_only: true
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
-  tmpfs: [/tmp:rw,noexec,nosuid,size=64m]
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
   env_file: .env
   environment:
     POSTGRES__HOST: db

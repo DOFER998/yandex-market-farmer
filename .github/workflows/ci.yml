@@ -60,6 +60,10 @@ jobs:
           cp .env.example .env
           docker compose -f docker-compose.local.yml config --quiet
           docker compose -f docker-compose.prod.yml config --quiet
+          docker compose -f docker-compose.prod.yml config --format json | jq -e '
+            [.services.bot.tmpfs, .services.migrate.tmpfs] |
+            all(. == ["/tmp:rw,noexec,nosuid,size=64m"])
+          '
           docker compose -f docker-compose.prod.yml -f docker-compose.build.yml config --quiet
 
   image:
