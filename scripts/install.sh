@@ -169,6 +169,20 @@ prepare_runtime() {
     INSTALL_STAGE=''
 }
 
+repair_runtime_compose() {
+    local path=$1 temporary
+    [[ -f "$path" && ! -L "$path" ]] || die 'Compose должен быть обычным файлом'
+    if grep -Fxq '  tmpfs: [/tmp:rw,noexec,nosuid,size=64m]' "$path"; then
+        [[ ! -e "$path.before-tmpfs-fix" && ! -L "$path.before-tmpfs-fix" ]] || die 'Резервная копия Compose уже существует; проверьте её перед повторной правкой'
+        cp -p -- "$path" "$path.before-tmpfs-fix"
+        temporary=$(mktemp "${path}.XXXXXX")
+        sed 's|^  tmpfs: \[/tmp:rw,noexec,nosuid,size=64m\]$|  tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]|' "$path" > "$temporary"
+        chmod 644 "$temporary"
+        mv -- "$temporary" "$path"
+        log 'Исправлена запись tmpfs из v0.1.0; исходный Compose сохранён в .before-tmpfs-fix.'
+    fi
+}
+
 deploy_runtime() {
     docker compose -f docker-compose.prod.yml config --quiet
     docker compose -f docker-compose.prod.yml pull
@@ -240,6 +254,7 @@ main() {
     fi
     chmod 600 .env
     grep -Eq '^YMF_IMAGE=.+$' .env || die 'В .env отсутствует YMF_IMAGE; сборка на VPS не поддерживается'
+    repair_runtime_compose docker-compose.prod.yml
     deploy_runtime
     log 'Установка завершена. Откройте бота → Добавить аккаунт → Подключение → Войти через QR.'
     printf 'Каталог: %s\nЛоги: cd %s && sudo docker compose -f docker-compose.prod.yml logs -f bot\n' "$target" "$target"

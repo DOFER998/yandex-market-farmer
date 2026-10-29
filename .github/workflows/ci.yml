@@ -96,3 +96,5 @@ jobs:
           assert qr_png(SecretStr("https://passport.yandex.ru/ci")).startswith(bytes.fromhex("89504e47"))
           '
           docker run --rm --network none ymf:ci alembic heads
+      - name: Production Compose mounts, migrations and healthcheck
+        run: bash scripts/smoke_compose.sh ymf:ci

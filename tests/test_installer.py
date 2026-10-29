@@ -173,3 +173,25 @@ def test_legacy_source_install_is_not_silently_replaced(tmp_path):
     result = shell('prepare_runtime "$DEFAULT_REPO" latest "$1"', str(target))
     assert result.returncode != 0
     assert (target / '.env').read_text() == 'keep'
+
+
+def test_repairs_v010_tmpfs_without_changing_other_configuration(tmp_path):
+    compose = tmp_path / 'docker-compose.prod.yml'
+    original = 'x-app:\n  tmpfs: [/tmp:rw,noexec,nosuid,size=64m]\n  image: custom\n'
+    compose.write_text(original)
+    result = shell('repair_runtime_compose "$1"; repair_runtime_compose "$1"', str(compose))
+    assert result.returncode == 0, result.stderr
+    assert compose.read_text() == original.replace(
+        '[/tmp:rw,noexec,nosuid,size=64m]', '["/tmp:rw,noexec,nosuid,size=64m"]'
+    )
+    assert compose.with_suffix('.yml.before-tmpfs-fix').read_text() == original
+
+
+def test_runtime_repair_leaves_custom_tmpfs_untouched(tmp_path):
+    compose = tmp_path / 'docker-compose.prod.yml'
+    original = 'x-app:\n  tmpfs: ["/tmp:size=128m"]\n'
+    compose.write_text(original)
+    result = shell('repair_runtime_compose "$1"', str(compose))
+    assert result.returncode == 0, result.stderr
+    assert compose.read_text() == original
+    assert not compose.with_suffix('.yml.before-tmpfs-fix').exists()

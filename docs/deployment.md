@@ -53,14 +53,15 @@ Docker управляет собственными сетевыми правил
 ### Выбор версии и повторный запуск
 
 По умолчанию выбирается последний стабильный GitHub Release, не `main` или `dev`.
-Можно передать `--version v0.1.0`; для форка — `--repo OWNER/REPO`.
+Можно передать `--version v0.1.1`; для форка — `--repo OWNER/REPO`.
 Если релиза или его файлов нет, установка останавливается без перехода к сборке из исходников.
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yandex-market-farmer/main/scripts/install.sh) --version v0.1.0
+bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yandex-market-farmer/main/scripts/install.sh) --version v0.1.1
 ```
 
 Повторный запуск сохраняет существующие Compose, `.env`, cookies, БД и выбранный digest.
+Известная ошибка `tmpfs` в Compose v0.1.0 исправляется автоматически с резервной копией `.before-tmpfs-fix`; остальные настройки сохраняются.
 Это восстановление установки, **не обновление версии**. Старую установку со сборкой из исходников
 скрипт автоматически не перезаписывает: сначала сделайте резервную копию, перенесите Compose
 и настройки образа вручную, сохранив `.env`, каталог сессий, UID/GID и имя Compose-проекта.
