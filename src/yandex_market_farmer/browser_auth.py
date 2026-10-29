@@ -9,8 +9,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .client import PAGE
-from .errors import AccessDenied, AuthRequired, ProtocolError, SessionError
-from .page import challenge_url, page_context
+from .errors import SessionError
+from .page import challenge_page, challenge_url
 from .session import allowed_domain
 
 LOGIN_URL = "https://passport.yandex.ru/auth?retpath=https%3A%2F%2Fmarket.yandex.ru%2Fkolesoprizov"
@@ -68,12 +68,13 @@ def wait_for_session(context, page, *, timeout=300) -> MozillaCookieJar:
             applicable = browser_cookies_to_jar(context.cookies([PAGE]))
             if any(c.name == "Session_id" and c.value for c in applicable):
                 try:
-                    page_context(page.content())
-                except (AccessDenied, AuthRequired, ProtocolError, Error):
+                    active_challenge = challenge_page(page.content())
+                except Error:
                     # Navigation may still be in flight; keep window available for the user.
                     pass
                 else:
-                    return browser_cookies_to_jar(context.cookies())
+                    if not active_challenge:
+                        return browser_cookies_to_jar(context.cookies())
         page.wait_for_timeout(500)
     raise SessionError("Login timed out: authenticated Market page not ready; run ymf login again")
 

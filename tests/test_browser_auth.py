@@ -159,3 +159,19 @@ def test_login_does_not_capture_session_on_active_challenge(path):
     context = SimpleNamespace(cookies=lambda urls=None: [cookie()])
     wait_for_session(context, page, timeout=2)
     assert page.waits == 1
+
+
+def test_loaded_market_does_not_require_api_bootstrap_fields():
+    """Browser DOM need not retain the bootstrap JSON consumed by the HTTP client."""
+
+    def unexpected_wait(_):
+        raise AssertionError("Login must finish once Market and session cookie are ready")
+
+    page = SimpleNamespace(
+        url="https://market.yandex.ru/kolesoprizov",
+        is_closed=lambda: False,
+        content=lambda: "<html><title>Яндекс Маркет</title><body>Колесо призов</body></html>",
+        wait_for_timeout=unexpected_wait,
+    )
+    context = SimpleNamespace(cookies=lambda urls=None: [cookie()])
+    assert next(iter(wait_for_session(context, page))).value == "secret"
