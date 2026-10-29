@@ -55,25 +55,54 @@ def challenge_page(text: str) -> bool:
     }
 
 
+def _values(text: str, key: str) -> list[str]:
+    pattern = r'"' + re.escape(key) + r'"\s*:\s*("(?:[^"\\]|\\.)*")'
+    try:
+        return [json.loads(match[1]) for match in re.finditer(pattern, text)]
+    except ValueError:
+        raise ProtocolError("Invalid page context") from None
+
+
+def _desktop_versions(text: str) -> list[str]:
+    # Go appVersionRegex selects the first matching desktop version, not the first -version.
+    return [value for value in _values(text, "-version") if re.fullmatch(r".+-desktop\..+", value)]
+
+
+def context_diagnostics(text: str) -> dict[str, bool | int]:
+    """Only fixed keys and counts/flags; never expose HTML, identifiers or token values."""
+    return {
+        "challenge_detected": challenge_page(text),
+        "sk_present": bool(next(iter(_values(text, "sk")), "")),
+        "login_present": bool(next(iter(_values(text, "login")), "")),
+        "version_matches": len(_values(text, "-version")),
+        "desktop_version_matches": len(_desktop_versions(text)),
+        "front_glue_present": bool(next(iter(_values(text, "marketFrontGlue")), "")),
+        "front_glue_key_mentioned": "marketFrontGlue" in text,
+        "desktop_marker_mentioned": "-desktop." in text,
+    }
+
+
 def page_context(text: str) -> AuthContext:
     if challenge_page(text):
         raise AccessDenied("Active challenge page; resolve manually in browser")
 
     def extract(key):
-        match = re.search(r'"' + re.escape(key) + r'"\s*:\s*("(?:[^"\\]|\\.)*")', text)
-        if not match:
-            return ""
-        try:
-            return json.loads(match[1])
-        except ValueError:
-            raise ProtocolError("Invalid page context") from None
+        return next(iter(_values(text, key)), "")
 
     sk, login = extract("sk"), extract("login")
     if not sk or not login:
         raise AuthRequired("Authenticated profile missing; run ymf login")
-    version, glue = extract("-version"), extract("marketFrontGlue")
-    if "-desktop." not in version or not glue:
-        raise ProtocolError("Market page context missing or changed")
+    version = next(iter(_desktop_versions(text)), "")
+    glue = extract("marketFrontGlue")
+    if not version or not glue:
+        missing = []
+        if not version:
+            missing.append("desktop_version")
+        if not glue:
+            missing.append("marketFrontGlue")
+        raise ProtocolError(
+            "Market page context missing: " + ", ".join(missing) + "; run ymf diagnose-auth"
+        )
     return AuthContext(
         sk=sk, login=login, version=version, glue=glue, language=extract("lang") or "ru"
     )

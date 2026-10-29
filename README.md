@@ -110,3 +110,15 @@ uv run ymf --enable-claims claim-game GAME_ID
 PostgreSQL + SQLModel (через SQLAlchemy) + Alembic; блокировки на аккаунт; aiogram 3 с allowlist user ID;
 APScheduler; Docker Compose с healthcheck, секретами, рестартами и persistent storage.
 Эти зависимости пока не добавлены.
+
+## Ошибка контекста страницы
+
+Если auth-check сообщает об отсутствии desktop_version или marketFrontGlue:
+
+```bash
+uv run ymf diagnose-auth
+```
+
+Команда делает только GET страницы и выводит фиксированный набор флагов/счётчиков найденных
+полей. Cookies, HTML, логин, SK и значения токенов не выводятся. Этот JSON можно прислать для
+диагностики. Перелогиниваться при одной лишь ошибке контекста не требуется.

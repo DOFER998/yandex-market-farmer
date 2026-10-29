@@ -339,3 +339,14 @@ def test_redirect_to_challenge_is_not_misreported_as_expired_session():
     with pytest.raises(AccessDenied) as error:
         MarketClient(wire, interval=0).check_auth()
     assert "secret" not in str(error.value)
+
+
+def test_diagnose_auth_fetches_only_html_and_returns_no_secrets():
+    wire = Wire(HTML.replace("v-desktop.1", "other-module"))
+    result = MarketClient(wire, interval=0).diagnose_auth()
+    assert result["desktop_version_matches"] == 0
+    assert result["front_glue_present"] is True
+    assert len(wire.calls) == 1
+    assert wire.calls[0][0] == "GET"
+    assert "secret" not in json.dumps(result)
+    assert "alice" not in json.dumps(result)

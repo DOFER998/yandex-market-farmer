@@ -21,7 +21,7 @@ from .errors import (
     UncertainClaim,
 )
 from .models import AuthContext, DailyClaim, Game, GameClaim, Hub, Level, Mission
-from .page import challenge_page, challenge_url, page_context
+from .page import challenge_page, challenge_url, context_diagnostics, page_context
 
 ORIGIN = "https://market.yandex.ru"
 PATH = "/kolesoprizov?track=menu"
@@ -152,24 +152,30 @@ class MarketClient:
             raise AccessDenied("Active challenge page; resolve manually in browser")
         return text
 
+    def _fetch_auth_page(self):
+        return self._send(
+            "GET",
+            PAGE,
+            headers={
+                "accept": "text/html,application/xhtml+xml",
+                "referer": ORIGIN + "/",
+                "sec-fetch-dest": "document",
+                "sec-fetch-mode": "navigate",
+                "sec-fetch-site": "same-origin",
+                "sec-fetch-user": "?1",
+            },
+        )
+
+    def diagnose_auth(self) -> dict[str, bool | int]:
+        with self._lock:
+            return context_diagnostics(self._fetch_auth_page())
+
     def check_auth(self, *, force=True) -> AuthContext:
         with self._lock:
             if not force and self._context and time.monotonic() - self._auth_at < 3600:
                 return self._context
             self._context = None
-            text = self._send(
-                "GET",
-                PAGE,
-                headers={
-                    "accept": "text/html,application/xhtml+xml",
-                    "referer": ORIGIN + "/",
-                    "sec-fetch-dest": "document",
-                    "sec-fetch-mode": "navigate",
-                    "sec-fetch-site": "same-origin",
-                    "sec-fetch-user": "?1",
-                },
-            )
-
+            text = self._fetch_auth_page()
             self._context = page_context(text)
             self._auth_at = time.monotonic()
             return self._context

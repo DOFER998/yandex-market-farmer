@@ -67,3 +67,17 @@ def test_uncertain_claim_survives_save_failure(tmp_path, monkeypatch, capsys):
 def test_transport_explicitly_disables_libcurl_env_proxy():
     with make_session(None) as session:
         assert session.proxies.get("all") == ""
+
+
+def test_diagnose_auth_cli_outputs_safe_report(tmp_path, monkeypatch, capsys):
+    from yandex_market_farmer import cli
+
+    path = tmp_path / "private" / "cookies.txt"
+    path.parent.mkdir(mode=0o700)
+    path.write_text(
+        "# Netscape HTTP Cookie File\n.yandex.ru\tTRUE\t/\tTRUE\t0\tSession_id\tprivate\n"
+    )
+    path.chmod(0o600)
+    monkeypatch.setattr(cli.MarketClient, "diagnose_auth", lambda _: {"desktop_version_matches": 0})
+    assert main(["--session", str(path), "diagnose-auth"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"desktop_version_matches": 0}

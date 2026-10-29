@@ -25,7 +25,7 @@ def main(argv=None):
     commands.add_parser("login").add_argument(
         "--browser", choices=("auto", "chrome", "msedge", "chromium"), default="auto"
     )
-    for name in ("auth-check", "balance", "daily", "games", "claim-daily"):
+    for name in ("auth-check", "diagnose-auth", "balance", "daily", "games", "claim-daily"):
         commands.add_parser(name)
     for name in ("levels", "claim-game"):
         commands.add_parser(name).add_argument("game_id")
@@ -51,6 +51,8 @@ def main(argv=None):
                             case "auth-check":
                                 client.check_auth()
                                 result = {"authenticated": True}
+                            case "diagnose-auth":
+                                result = client.diagnose_auth()
                             case "balance":
                                 result = {"coins": client.balance()}
                             case "daily":
