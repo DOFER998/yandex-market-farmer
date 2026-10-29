@@ -27,6 +27,7 @@ x-app: &app
 
 services:
   db:
+    container_name: "${COMPOSE_PROJECT_NAME:-ymf-prod}-db"
     image: postgres:17-bookworm
     restart: unless-stopped
     environment:
@@ -45,6 +46,7 @@ services:
         max-size: 10m
         max-file: "3"
   migrate:
+    container_name: "${COMPOSE_PROJECT_NAME:-ymf-prod}-migrate"
     <<: *app
     command: [alembic, upgrade, head]
     restart: "no"
@@ -52,6 +54,7 @@ services:
       db:
         condition: service_healthy
   bot:
+    container_name: "${COMPOSE_PROJECT_NAME:-ymf-prod}-bot"
     <<: *app
     command: [python, -m, src.main]
     restart: unless-stopped
