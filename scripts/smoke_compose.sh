@@ -25,7 +25,25 @@ YMF_UID=1000
 YMF_GID=1000
 YMF_IMAGE=${1:-ymf:ci}
 ENV
-compose run --rm migrate
+# Exercise the same dependency chain as the installer, without Telegram requests.
+cat > "$smoke_dir/health-only.yml" <<'YAML'
+services:
+  bot:
+    command:
+      - python
+      - -c
+      - |
+        import time
+        from pathlib import Path
+        stamp = Path('/tmp/ymf/heartbeat')
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        while True:
+            stamp.write_text(str(time.time()))
+            time.sleep(1)
+YAML
+docker compose --project-name "$smoke_project" --project-directory "$smoke_dir" \
+    -f "$smoke_dir/docker-compose.prod.yml" -f "$smoke_dir/health-only.yml" \
+    up -d --no-build --wait --wait-timeout 180
 compose run --rm -T --no-deps bot python - <<'PY'
 import asyncio
 import errno

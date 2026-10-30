@@ -32,7 +32,7 @@ sudo bash -c 'bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yande
 
 ```text
 /opt/yandex-market-farmer/
-├── docker-compose.prod.yml
+├── docker-compose.yml
 ├── .env                       # токен, ID, пароль БД, UID/GID и YMF_IMAGE с digest
 ├── .ymf-install               # служебная отметка версии
 └── .secrets/accounts/          # сессии Яндекса
@@ -49,6 +49,20 @@ Docker управляет собственными сетевыми правил
 
 После запуска: **Начать → Добавить аккаунт → Подключение → Войти через QR → Сохранить вход**.
 Проверьте логин и включите автосбор в настройках. Браузер на VPS не нужен.
+
+В репозитории файл называется `docker-compose.prod.yml`, на сервере — `docker-compose.yml`.
+Поэтому параметр `-f` не нужен. При повторной установке старое имя автоматически
+заменяется на `docker-compose.yml` без изменения содержимого.
+
+### Вывод установщика
+
+Установщик показывает этапы и время выполнения; вывод APT и Docker сохраняет
+в отдельный `/var/log/ymf/install-XXXXXXXX.log` с правами `0600`.
+При ошибке этап отмечается `✗`, установка останавливается и показывает путь к логу.
+Не публикуйте полный лог без проверки: сообщения сторонних программ могут содержать
+служебные данные. Без TTY вывод обычный, без управляющих кодов; `NO_COLOR=1` отключает цвета.
+Миграцию выполняет Compose: PostgreSQL → миграция → бот. Бот не запускается,
+если миграция завершилась с ошибкой. Проверка готовности ограничена 180 секундами.
 
 ### Выбор версии и повторный запуск
 
@@ -71,24 +85,23 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yandex-market-farme
 Из `/opt/yandex-market-farmer`, от root или с sudo:
 
 ```bash
-docker compose -f docker-compose.prod.yml ps
-docker compose -f docker-compose.prod.yml logs -f bot
-docker compose -f docker-compose.prod.yml down           # данные сохраняются
+docker compose ps
+docker compose logs -f bot
+docker compose down           # данные сохраняются
 ```
 
 ## Обновление готового образа
 
 Сначала сделайте резервную копию. На странице нужного [релиза](https://github.com/DOFER998/yandex-market-farmer/releases)
-скачайте `docker-compose.prod.yml` и `image.ref`. Первый заменяет Compose; содержимое второго
+скачайте `docker-compose.prod.yml` и `image.ref`. Первый сохраните на сервере как `docker-compose.yml`; содержимое второго
 становится значением `YMF_IMAGE` в существующем `.env`. Не заменяйте остальные настройки `.env`.
 Compose и digest должны быть из **одного релиза**.
 
 ```bash
-docker compose -f docker-compose.prod.yml config --quiet
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml stop bot
-docker compose -f docker-compose.prod.yml run --rm migrate
-docker compose -f docker-compose.prod.yml up -d --no-build --wait
+docker compose config --quiet
+docker compose pull
+docker compose stop bot
+docker compose up -d --no-build --wait --wait-timeout 180
 ```
 
 При ошибке миграции бот остаётся остановленным. Смена образа не откатывает схему БД:

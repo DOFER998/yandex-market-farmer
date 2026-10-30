@@ -6,8 +6,79 @@ set -Eeuo pipefail
 
 DEFAULT_REPO=DOFER998/yandex-market-farmer
 
-log() { printf '\n[ymf] %s\n' "$*"; }
-die() { printf '\n[ymf] Ошибка: %s\n' "$*" >&2; exit 1; }
+# Keep the UI on stdout and command output in a private per-run log.
+INSTALL_LOG=''
+STEP_PID=''
+ACTIVE_STEP=''
+COLOR='' GREEN='' RED='' RESET=''
+
+init_ui() {
+    if [[ -t 1 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
+        COLOR=$'\033[1;36m'; GREEN=$'\033[1;32m'; RED=$'\033[1;31m'; RESET=$'\033[0m'
+    fi
+    printf '\n%s  Yandex Market Farmer%s\n' "$COLOR" "$RESET"
+    printf '  Установка на сервер · Docker + PostgreSQL\n\n'
+}
+
+log() { printf '  · %s\n' "$*"; }
+die() { printf '\n%s  ✗ %s%s\n' "$RED" "$*" "$RESET" >&2; exit 1; }
+
+init_install_log() {
+    install -d -m 0700 /var/log/ymf
+    INSTALL_LOG=$(mktemp /var/log/ymf/install-XXXXXXXX.log)
+    chmod 600 "$INSTALL_LOG"
+}
+
+run_step() {
+    local title=$1 started=$SECONDS status
+    shift
+    ACTIVE_STEP=$title
+    printf '  … %s\n' "$title"
+    # Do not invoke this function inside an if/||: that disables Bash errexit.
+    # Each command/function runs with errexit; wait is checked separately.
+    (
+        trap - ERR
+        set -e
+        "$@"
+    ) >> "${INSTALL_LOG:-/dev/null}" 2>&1 &
+    STEP_PID=$!
+    while kill -0 "$STEP_PID" 2>/dev/null; do
+        if [[ -t 1 ]]; then
+            printf '\r\033[2K  … %s · %ss' "$title" "$((SECONDS - started))"
+        fi
+        sleep 1
+    done
+    if wait "$STEP_PID"; then status=0; else status=$?; fi
+    STEP_PID=''
+    [[ ! -t 1 ]] || printf '\r\033[2K'
+    if ((status != 0)); then
+        printf '%s  ✗ %s · %ss%s\n' "$RED" "$title" "$((SECONDS - started))" "$RESET" >&2
+        return "$status"
+    fi
+    printf '%s  ✓ %s · %ss%s\n' "$GREEN" "$title" "$((SECONDS - started))" "$RESET"
+    ACTIVE_STEP=''
+}
+
+installation_failed() {
+    local status=$1
+    trap - ERR
+    if [[ "$ACTIVE_STEP" == 'Миграция БД и запуск бота' && -n "$INSTALL_LOG" ]]; then
+        docker compose logs --no-color --tail=100 migrate bot >> "$INSTALL_LOG" 2>&1 || true
+    fi
+    printf '\n%s  Установка не завершена%s\n' "$RED" "$RESET" >&2
+    [[ -z "$ACTIVE_STEP" ]] || printf '  Этап: %s\n' "$ACTIVE_STEP" >&2
+    printf '  Данные сохранены.\n' >&2
+    [[ -z "$INSTALL_LOG" ]] || printf '  Подробности: less %s\n' "$INSTALL_LOG" >&2
+    exit "$status"
+}
+
+cleanup() {
+    if [[ -n "$STEP_PID" ]]; then
+        kill "$STEP_PID" 2>/dev/null || true
+        wait "$STEP_PID" 2>/dev/null || true
+    fi
+    [[ -z "${INSTALL_STAGE:-}" ]] || rm -rf -- "$INSTALL_STAGE"
+}
 
 usage() {
     cat <<'HELP'
@@ -62,11 +133,14 @@ write_env() {
     mv -- "$temporary" "$path"
 }
 
-install_dependencies() {
-    local package installed conflict=false
-    log 'Устанавливаю необходимые утилиты.'
+install_utilities() {
     apt-get update -qq
     apt-get install -y --no-install-recommends ca-certificates curl jq openssl
+}
+
+install_dependencies() {
+    local package installed conflict=false
+    run_step 'Проверка и установка утилит' install_utilities
     if command -v docker >/dev/null 2>&1; then
         log 'Docker уже установлен; сохраняю существующую установку.'
         docker compose version >/dev/null || die 'Нужен Docker Compose plugin. Установите его для своей версии Docker и повторите запуск.'
@@ -97,8 +171,8 @@ Components: stable
 Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/ymf-docker.asc
 SOURCES
-        apt-get update -qq
-        apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-compose-plugin
+        run_step 'Обновление списка пакетов Docker' apt-get update -qq
+        run_step 'Установка Docker' apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-compose-plugin
     fi
     local compose_version major minor
     compose_version=$(docker compose version --short)
@@ -106,8 +180,8 @@ SOURCES
     IFS=. read -r major minor _ <<< "$compose_version"
     [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || die 'Не удалось проверить версию Docker Compose'
     ((major > 2 || (major == 2 && minor >= 20))) || die 'Нужен Docker Compose 2.20 или новее'
-    systemctl enable --now docker
-    docker info >/dev/null || die 'Docker daemon недоступен'
+    run_step 'Запуск Docker' systemctl enable --now docker
+    docker info >/dev/null 2>&1 || die 'Docker daemon недоступен'
 }
 
 guard_existing_stack() {
@@ -155,18 +229,26 @@ prepare_runtime() {
     [[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || die 'Нужен стабильный релиз vX.Y.Z'
     base="https://github.com/$repo/releases/download/$version"
     log "Скачиваю Compose и ссылку на готовый образ релиза $version."
-    download_file "$base/docker-compose.prod.yml" "$INSTALL_STAGE/docker-compose.prod.yml"
+    download_file "$base/docker-compose.prod.yml" "$INSTALL_STAGE/docker-compose.yml"
     download_file "$base/image.ref" "$INSTALL_STAGE/image.ref"
     IMAGE=$(cat "$INSTALL_STAGE/image.ref")
     validate_image "$repo" "$IMAGE" || die 'Релиз должен содержать digest образа выбранного репозитория'
     rm "$INSTALL_STAGE/image.ref"
     printf 'image-runtime-v1\n%s\n%s\n' "$version" "$IMAGE" > "$INSTALL_STAGE/.ymf-install"
     chmod 755 "$INSTALL_STAGE"
-    chmod 644 "$INSTALL_STAGE/docker-compose.prod.yml"
+    chmod 644 "$INSTALL_STAGE/docker-compose.yml"
     chmod 600 "$INSTALL_STAGE/.ymf-install"
     [[ ! -d "$target" ]] || rmdir -- "$target"
     mv -- "$INSTALL_STAGE" "$target"
     INSTALL_STAGE=''
+}
+
+normalize_compose_name() {
+    if [[ ! -e docker-compose.yml && ! -L docker-compose.yml ]]; then
+        [[ -f docker-compose.prod.yml && ! -L docker-compose.prod.yml ]] || die 'Compose установки не найден'
+        mv -- docker-compose.prod.yml docker-compose.yml
+    fi
+    [[ -f docker-compose.yml && ! -L docker-compose.yml ]] || die 'Compose должен быть обычным файлом'
 }
 
 repair_runtime_compose() {
@@ -184,12 +266,11 @@ repair_runtime_compose() {
 }
 
 deploy_runtime() {
-    docker compose -f docker-compose.prod.yml config --quiet
-    docker compose -f docker-compose.prod.yml pull
-    docker compose -f docker-compose.prod.yml stop bot
-    docker compose -f docker-compose.prod.yml run --rm migrate
-    docker compose -f docker-compose.prod.yml up -d --no-build --wait
-    docker compose -f docker-compose.prod.yml ps
+    run_step 'Проверка конфигурации' docker compose config --quiet
+    run_step 'Загрузка образов' docker compose pull
+    run_step 'Остановка предыдущего бота' docker compose stop bot
+    # Compose starts migrate after the healthy DB, then bot only after migration success.
+    run_step 'Миграция БД и запуск бота' docker compose up -d --no-build --wait --wait-timeout 180
 }
 
 main() {
@@ -227,6 +308,8 @@ main() {
     [[ ! -L /opt && ! -L "$target" ]] || die 'Symlink в пути установки не поддерживается'
     exec 9>/run/lock/ymf-install.lock
     flock -n 9 || die 'Другой установщик уже работает'
+    init_ui
+    init_install_log
     install_dependencies
     guard_existing_stack "$target"
     prepare_runtime "$repo" "$version" "$target"
@@ -254,15 +337,21 @@ main() {
     fi
     chmod 600 .env
     grep -Eq '^YMF_IMAGE=.+$' .env || die 'В .env отсутствует YMF_IMAGE; сборка на VPS не поддерживается'
-    repair_runtime_compose docker-compose.prod.yml
+    normalize_compose_name
+    repair_runtime_compose docker-compose.yml
     deploy_runtime
-    log 'Установка завершена. Откройте бота → Добавить аккаунт → Подключение → Войти через QR.'
-    printf 'Каталог: %s\nЛоги: cd %s && sudo docker compose -f docker-compose.prod.yml logs -f bot\n' "$target" "$target"
+    printf '\n%s  ✓ Бот запущен%s\n' "$GREEN" "$RESET"
+    printf '  Откройте бота → Добавить аккаунт → Войти через QR\n\n'
+    printf '  Каталог  %s\n' "$target"
+    printf '  Логи     cd %s && docker compose logs -f bot\n' "$target"
+    printf '  Установка  %s\n\n' "$INSTALL_LOG"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     INSTALL_STAGE=''
-    trap '[[ -z "$INSTALL_STAGE" ]] || rm -rf -- "$INSTALL_STAGE"' EXIT
-    trap 'printf "\n[ymf] Установка прервана на строке %s. Данные не удалены; исправьте ошибку и повторите запуск.\n" "$LINENO" >&2' ERR
+    trap cleanup EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'installation_failed $?' ERR
     main "$@"
 fi

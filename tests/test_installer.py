@@ -96,7 +96,7 @@ def test_runtime_install_downloads_only_compose_and_pinned_image(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     target = tmp_path / 'runtime'
-    assert {p.name for p in target.iterdir()} == {'.env', '.ymf-install', 'docker-compose.prod.yml'}
+    assert {p.name for p in target.iterdir()} == {'.env', '.ymf-install', 'docker-compose.yml'}
     assert (target / '.env').read_text() == 'saved-token'
     assert 'v0.1.0' in (target / '.ymf-install').read_text()
 
@@ -156,12 +156,10 @@ def test_runtime_deploy_pulls_before_stopping_and_never_builds(tmp_path):
     assert result.returncode == 0, result.stderr
     calls = (tmp_path / 'calls').read_text().splitlines()
     assert calls == [
-        'compose -f docker-compose.prod.yml config --quiet',
-        'compose -f docker-compose.prod.yml pull',
-        'compose -f docker-compose.prod.yml stop bot',
-        'compose -f docker-compose.prod.yml run --rm migrate',
-        'compose -f docker-compose.prod.yml up -d --no-build --wait',
-        'compose -f docker-compose.prod.yml ps',
+        'compose config --quiet',
+        'compose pull',
+        'compose stop bot',
+        'compose up -d --no-build --wait --wait-timeout 180',
     ]
 
 
@@ -195,3 +193,60 @@ def test_runtime_repair_leaves_custom_tmpfs_untouched(tmp_path):
     assert result.returncode == 0, result.stderr
     assert compose.read_text() == original
     assert not compose.with_suffix('.yml.before-tmpfs-fix').exists()
+
+
+def test_step_hides_command_output_but_keeps_private_diagnostics(tmp_path):
+    report = tmp_path / 'install.log'
+    result = shell(
+        'umask 077; INSTALL_LOG="$1"; '
+        'work() { printf "verbose docker output\\n"; printf "detail\\n" >&2; }; '
+        'run_step "Загрузка образов" work',
+        str(report),
+    )
+    assert result.returncode == 0, result.stderr
+    assert '✓ Загрузка образов' in result.stdout
+    assert 'verbose docker output' not in result.stdout + result.stderr
+    assert 'verbose docker output' in report.read_text()
+    assert 'detail' in report.read_text()
+    assert report.stat().st_mode & 0o777 == 0o600
+    assert '\x1b' not in result.stdout
+
+
+def test_failed_step_stops_function_and_does_not_report_success(tmp_path):
+    report = tmp_path / 'install.log'
+    result = shell(
+        'INSTALL_LOG="$1"; '
+        'work() { printf "migration failed\\n"; return 42; printf "must not execute"; }; '
+        'run_step "Миграция" work; printf "must not continue"',
+        str(report),
+    )
+    assert result.returncode == 42
+    assert '✗ Миграция' in result.stderr
+    assert '✓' not in result.stdout
+    assert 'must not' not in result.stdout + report.read_text()
+
+
+def test_inner_failure_cannot_be_hidden_by_later_success(tmp_path):
+    result = shell(
+        'INSTALL_LOG="$1"; work() { false; printf "must not execute"; }; run_step "Проверка" work',
+        str(tmp_path / 'install.log'),
+    )
+    assert result.returncode != 0
+    assert 'must not' not in (tmp_path / 'install.log').read_text()
+
+
+def test_existing_compose_is_renamed_without_changing_content(tmp_path):
+    old = tmp_path / 'docker-compose.prod.yml'
+    old.write_text('name: ymf-prod\n# custom settings\n')
+    result = shell('cd "$1"; normalize_compose_name; normalize_compose_name', str(tmp_path))
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / 'docker-compose.yml').read_text() == 'name: ymf-prod\n# custom settings\n'
+    assert not old.exists()
+
+
+def test_existing_default_compose_is_preserved(tmp_path):
+    (tmp_path / 'docker-compose.yml').write_text('keep')
+    (tmp_path / 'docker-compose.prod.yml').write_text('legacy')
+    result = shell('cd "$1"; normalize_compose_name', str(tmp_path))
+    assert result.returncode == 0
+    assert (tmp_path / 'docker-compose.yml').read_text() == 'keep'
