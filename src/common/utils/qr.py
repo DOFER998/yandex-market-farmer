@@ -10,6 +10,7 @@ def qr_png(link: SecretStr) -> bytes:
     import qrcode
     from PIL import Image, ImageDraw
     from qrcode.image.styledpil import StyledPilImage
+    from qrcode.image.styles.colormasks import SolidFillColorMask
     from qrcode.image.styles.moduledrawers.pil import RoundedModuleDrawer
 
     # H compensates for the small central badge; four clear modules remain untouched.
@@ -21,33 +22,33 @@ def qr_png(link: SecretStr) -> bytes:
     qr.make(fit=True)
     picture = qr.make_image(
         image_factory=StyledPilImage,
-        module_drawer=RoundedModuleDrawer(radius_ratio=0.65),
+        module_drawer=RoundedModuleDrawer(radius_ratio=1),
+        color_mask=SolidFillColorMask(front_color=(24, 24, 24)),
     ).convert('RGB')
     draw = ImageDraw.Draw(picture)
     offset = border * box
     far = (border + qr.modules_count - 7) * box
     for x, y in ((offset, offset), (far, offset), (offset, far)):
         draw.rectangle((x, y, x + 7 * box - 1, y + 7 * box - 1), fill='white')
-        draw.rounded_rectangle(
-            (x, y, x + 7 * box - 1, y + 7 * box - 1), radius=box * 2, fill='#242424'
-        )
+        draw.rounded_rectangle((x, y, x + 7 * box - 1, y + 7 * box - 1), radius=25, fill='#181818')
         draw.rounded_rectangle(
             (x + box, y + box, x + 6 * box - 1, y + 6 * box - 1),
-            radius=box,
+            radius=13,
             fill='white',
         )
         draw.rounded_rectangle(
             (x + 2 * box, y + 2 * box, x + 5 * box - 1, y + 5 * box - 1),
-            radius=box // 2,
-            fill='#D43818',
+            radius=8,
+            fill='#181818',
         )
     center = picture.width // 2
-    radius = 3 * box
-    draw.ellipse((center - radius, center - radius, center + radius, center + radius), fill='white')
-    with Image.open(ASSETS / 'market-coin.png') as source:
-        coin = source.convert('RGBA')
-        coin.thumbnail((box * 4, box * 4), Image.Resampling.LANCZOS)
-        picture.paste(coin, (center - coin.width // 2, center - coin.height // 2), coin)
+    draw.rounded_rectangle(
+        (center - 54, center - 54, center + 54, center + 54), radius=20, fill='white'
+    )
+    with Image.open(ASSETS / 'market-mono.png') as source:
+        mark = source.convert('RGBA')
+        mark.thumbnail((84, 84), Image.Resampling.LANCZOS)
+        picture.paste(mark, (center - mark.width // 2, center - mark.height // 2), mark)
     stream = BytesIO()
     picture.save(stream, format='PNG')
     return stream.getvalue()

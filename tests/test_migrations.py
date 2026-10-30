@@ -66,3 +66,40 @@ def test_name_migration_preserves_existing_accounts(tmp_path):
             await engine.dispose()
 
     asyncio.run(verify())
+
+
+def test_review_migration_preserves_preferences_and_downgrade_preserves_guard(tmp_path):
+    from sqlalchemy import text
+
+    url = 'sqlite+aiosqlite:///' + str(tmp_path / 'review.db')
+    config = Config('alembic.ini')
+    config.attributes['database_url'] = url
+    command.upgrade(config, 'head')
+
+    async def seed():
+        engine = create_async_engine(url)
+        db = Database(engine)
+        await db.accounts.save(
+            Account(
+                id='pending', auto_collect=True, games_needs_review=True, games_review_game='ballz'
+            )
+        )
+        await engine.dispose()
+
+    asyncio.run(seed())
+    command.downgrade(config, '0003')
+
+    async def verify():
+        engine = create_async_engine(url)
+        async with engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    text("SELECT needs_review, auto_collect FROM accounts WHERE id='pending'")
+                )
+            ).one()
+            assert row.needs_review and not row.auto_collect
+        await engine.dispose()
+
+    asyncio.run(verify())
+    command.upgrade(config, 'head')
+    command.check(config)

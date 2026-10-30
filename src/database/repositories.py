@@ -8,6 +8,7 @@ from src.common.time import now
 from src.database.models import Account, BalanceSnapshot, FarmRun, Operation
 from src.services.errors import AccountNotFound
 from src.services.ports import RunStatistics
+from src.services.reward_schedule import defer_daily_review
 
 SessionFactory = Callable[[], AsyncSession]
 
@@ -87,9 +88,28 @@ class RunRepository:
                 run.finished_at = now()
                 run.error_code = 'ProcessInterrupted'
                 session.add(run)
+                if run.trigger == 'games':
+                    account.games_needs_review = True
+                    operations = (
+                        await session.exec(
+                            select(Operation)
+                            .where(Operation.run_id == run.id)
+                            .order_by(Operation.created_at.desc())
+                        )
+                    ).all()
+                    pending = next(
+                        (
+                            op
+                            for op in operations
+                            if op.kind.startswith('game:')
+                            and op.state in ('pending', 'uncertain', 'unconfirmed')
+                        ),
+                        None,
+                    )
+                    account.games_review_game = pending.kind[5:] if pending else None
+                elif run.trigger != 'read':
+                    defer_daily_review(account)
             if runs:
-                account.needs_review = True
-                account.auto_collect = False
                 session.add(account)
                 await session.commit()
             return bool(runs)

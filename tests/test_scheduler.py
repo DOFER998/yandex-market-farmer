@@ -122,3 +122,20 @@ def test_deleted_account_removes_job_without_retry():
         await scheduler.stop()
 
     asyncio.run(scenario())
+
+
+def test_pending_reward_review_keeps_daily_job_scheduled():
+    async def scenario():
+        accounts = Accounts(
+            Account(id='daily', auth_state='ready', auto_collect=True, daily_needs_review=True),
+            Account(id='games', auth_state='ready', auto_collect=True, games_needs_review=True),
+        )
+        scheduler = SchedulerService(accounts, None, Notifications())
+        await scheduler.start()
+        assert {job.id for job in scheduler._scheduler.get_jobs()} == {
+            'account:daily',
+            'account:games',
+        }
+        await scheduler.stop()
+
+    asyncio.run(scenario())

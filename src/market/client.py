@@ -298,8 +298,31 @@ class MarketClient:
             status = self.daily_status()
             if not status.available:
                 return DailyClaim(state='unavailable', next_reward_at=status.next_reward_at)
-            self._api('claim_daily')
-            # The reference does not define the daily claim response schema.
+            response = self._api('claim_daily')
+            # Captured 2026-10-30: REWARD_NOT_AVAILABLE can describe the state AFTER
+            # a successful credit. Only an explicit coin reward acknowledges credit.
+            try:
+                result = _dict(_at(response, 'result'))
+                reward = _dict(_at(result, 'rewardInfo', 'reward'))
+                info = _dict(_at(result, 'info'))
+                amount = reward.get('amount')
+                timestamp = info.get('nextRewardTs')
+                if (
+                    reward.get('type') == 'COIN'
+                    and type(amount) is int
+                    and amount > 0
+                    and info.get('rewardAvailable') is False
+                    and type(timestamp) is int
+                    and timestamp > 0
+                ):
+                    return DailyClaim(
+                        state='claimed',
+                        amount=amount,
+                        next_reward_at=datetime.fromtimestamp(timestamp, UTC),
+                    )
+            except (MarketError, ValueError, OverflowError, OSError):
+                pass
+            # Unknown acknowledgement is still not proof of credit.
             return DailyClaim(state='submitted_unverified')
 
     def games(self) -> Hub:

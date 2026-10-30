@@ -8,7 +8,7 @@ from src.market.models import DailyStatus
 from src.services.accounts import AccountService
 
 
-def test_service_journals_claim_and_disables_uncertain_account(tmp_path):
+def test_service_journals_unknown_daily_and_reconciles_without_disabling_autofarm(tmp_path):
     from src.database.models import Account
     from src.database.session import Database
     from src.market.errors import UncertainClaim
@@ -20,7 +20,7 @@ def test_service_journals_claim_and_disables_uncertain_account(tmp_path):
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
         db = Database(engine)
-        await db.accounts.save(Account(id='main'))
+        await db.accounts.save(Account(id='main', auto_collect=True))
         loop = asyncio.get_running_loop()
         calls = []
 
@@ -52,10 +52,14 @@ def test_service_journals_claim_and_disables_uncertain_account(tmp_path):
         result = await service.run('main')
         assert result.state == 'uncertain'
         account = await db.accounts.get('main')
-        assert account.needs_review and not account.auto_collect
+        assert account.daily_needs_review and account.auto_collect
+        assert not account.needs_review
         assert calls == ['daily']
         assert 'private' not in result.error_code
-        assert (await service.run('main')).state == 'blocked'
+        assert (await service.run('main')).state == 'reconciled'
+        assert calls == ['daily']
+        account = await db.accounts.get('main')
+        assert not account.daily_needs_review and account.auto_collect
         await engine.dispose()
 
     asyncio.run(scenario())
@@ -107,7 +111,7 @@ def test_service_unavailable_daily_does_not_collect_games(tmp_path):
     asyncio.run(scenario())
 
 
-def test_interrupted_run_blocks_mutations_until_explicit_reconcile(tmp_path):
+def test_interrupted_daily_is_reconciled_read_only_without_disabling_autofarm(tmp_path):
     from src.database.models import Account, FarmRun
     from src.database.session import Database
     from src.services.farming import FarmingService
@@ -136,19 +140,13 @@ def test_interrupted_run_blocks_mutations_until_explicit_reconcile(tmp_path):
             yield Client()
 
         service = FarmingService(db.accounts, db.runs, db.locks, tmp_path, factory=factory)
-        assert (await service.run('main')).state == 'blocked'
-        assert calls == []
-        assert not (await db.accounts.get('main')).auto_collect
-        assert (await db.runs.history('main'))[0].state == 'interrupted'
-        await service.run('main', read_only=True)
-        assert (await db.accounts.get('main')).needs_review
-        await service.run('main', read_only=True, reconcile=True)
+        result = await service.run('main')
+        assert result.state == 'reconciled'
+        assert calls == ['auth']
         account = await db.accounts.get('main')
-        assert not account.needs_review and not account.auto_collect
-        await AccountService(db.accounts, db.runs, db.locks, tmp_path).configure(
-            'main', enabled=True, minutes=60
-        )
-        assert (await db.accounts.get('main')).auto_collect
+        assert account.auto_collect and not account.daily_needs_review
+        history = await db.runs.history('main')
+        assert any(run.state == 'interrupted' for run in history)
         await engine.dispose()
 
     asyncio.run(scenario())
@@ -198,7 +196,9 @@ def test_cancellation_keeps_account_lock_until_worker_finishes(tmp_path):
         release.set()
         with pytest.raises(asyncio.CancelledError):
             await task
-        assert (await service.run('main')).state == 'blocked'
+        assert (await service.run('main', read_only=True)).state == 'success'
+        account = await db.accounts.get('main')
+        assert not account.needs_review and not account.daily_needs_review
         await engine.dispose()
 
     asyncio.run(scenario())
@@ -411,6 +411,16 @@ def test_daily_and_games_have_separate_execution_and_schedule(tmp_path):
         )
         assert any(op.kind == 'games' and op.error_code == 'ProtocolError' for op in details)
         assert all(op.run_id == failed.id for op in details)
+        account = await db.accounts.get('main')
+        assert not account.needs_review
+        account.auto_collect = True
+        account.next_run_at = now() - timedelta(seconds=1)
+        await db.accounts.save(account)
+        calls.clear()
+        scheduled = await service.run('main', trigger='schedule')
+        assert scheduled.state == 'unavailable'
+        assert calls == ['daily']
+        assert (await db.accounts.get('main')).auto_collect
         await engine.dispose()
 
     asyncio.run(scenario())

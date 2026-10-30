@@ -27,6 +27,8 @@ STATES = {
     'blocked': 'Нужна проверка состояния',
     'skipped': 'Сбор не требовался',
     'running': 'Выполняется',
+    'reconciled': 'Состояние награды проверено',
+    'review_pending': 'Ожидаем уточнения начисления',
 }
 
 
@@ -146,6 +148,30 @@ def status_text(
     if updated:
         blocks.append(updated)
     blocks.append(reward_section(account, 'Ежедневная награда', icons))
+    if account.daily_needs_review:
+        blocks.append(
+            section(
+                'Проверка ежедневной награды',
+                [
+                    'Предыдущий ответ не подтвердил начисление. '
+                    'Проверяем состояние без повторного сбора.'
+                ],
+                icon='refresh',
+                icons=icons,
+            )
+        )
+    if account.games_needs_review:
+        blocks.append(
+            section(
+                'Проверка игровых наград',
+                [
+                    'Результат игрового начисления неизвестен. '
+                    'Повторные игровые начисления заблокированы; daily работает отдельно.'
+                ],
+                icon='refresh',
+                icons=icons,
+            )
+        )
     if account.needs_review:
         blocks.append('<i>Нужна проверка после незавершённой операции. Нажми «Проверить вход».</i>')
     return GAP.join(blocks)
@@ -203,8 +229,10 @@ def settings_text(account: Account, icons: EmojiCatalog | None = None) -> str:
     )
 
 
-def connection_text(account: Account, icons: EmojiCatalog | None = None) -> str:
-    return GAP.join(
+def connection_text(
+    account: Account, icons: EmojiCatalog | None = None, *, created: bool = False
+) -> str:
+    return (heading('Аккаунт создан', 'confirm', icons) + GAP if created else '') + GAP.join(
         [
             section(
                 f'{account.display_name or account.id} · Подключение',
@@ -288,4 +316,32 @@ def delete_text(account: Account, icons: EmojiCatalog) -> str:
         ],
         icon='error',
         icons=icons,
+    )
+
+
+def name_prompt(
+    icons: EmojiCatalog | None = None, *, rename: bool = False, invalid: bool = False
+) -> str:
+    return GAP.join(
+        [
+            section(
+                'Переименовать аккаунт' if rename else 'Добавить аккаунт',
+                [
+                    'Отправь новое название одним сообщением.'
+                    if rename
+                    else 'Отправь название аккаунта одним сообщением.',
+                    'Например: «Основной» или «Семейный».',
+                ],
+                icon='rename' if rename else 'add',
+                icons=icons,
+            ),
+            section(
+                'Проверь название',
+                ['Нужно от 1 до 40 символов, без команд и переносов строк.'],
+                icon='error',
+                icons=icons,
+            )
+            if invalid
+            else '<i>От 1 до 40 символов. Название видно только в этом боте.</i>',
+        ]
     )

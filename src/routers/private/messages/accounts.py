@@ -7,7 +7,7 @@ from src.routers.private.messages.menu import menu_handler
 from src.services.accounts import AccountService
 from src.services.screens import ScreenService
 from src.states.account import AccountForm
-from src.views.accounts import connection_text, status_text
+from src.views.accounts import connection_text, name_prompt, status_text
 
 router = Router(name=__name__)
 
@@ -20,16 +20,16 @@ async def name_handler(
         await menu_handler(message, accounts, screens, state)
         return
     revision = screens.begin(message, callback=False)
+    data = await state.get_data()
     name = (message.text or '').strip()
     if not 1 <= len(name) <= 40 or name.startswith('/') or any(ord(c) < 32 for c in name):
         await screens.show(
             message,
-            'Название: от 1 до 40 символов, без команд и переносов строк.',
-            back_keyboard(icons=screens.icons),
+            name_prompt(screens.icons, rename=bool(data.get('rename')), invalid=True),
+            back_keyboard(data.get('rename') or '_', screens.icons),
             revision,
         )
         return
-    data = await state.get_data()
     await state.clear()
     if account_id := data.get('rename'):
         account = await accounts.rename(account_id, name)
@@ -40,7 +40,7 @@ async def name_handler(
     else:
         account = await accounts.create(name)
         text, keyboard = (
-            connection_text(account, screens.icons),
+            connection_text(account, screens.icons, created=True),
             connection_keyboard(account, screens.icons),
         )
     await screens.show(message, text, keyboard, revision)

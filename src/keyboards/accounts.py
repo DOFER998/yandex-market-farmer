@@ -60,7 +60,11 @@ def account_keyboard(account: Account, icons: EmojiCatalog | None = None) -> Inl
     builder.adjust(2)
     builder.row(
         account_button(
-            'Игровые награды', account.id, Action.COLLECT_GAMES, icons=icons, icon='collect'
+            'Проверить игровые награды' if account.games_needs_review else 'Игровые награды',
+            account.id,
+            Action.COLLECT_GAMES,
+            icons=icons,
+            icon='collect',
         )
     )
     if account.needs_review or account.auth_state != 'ready':

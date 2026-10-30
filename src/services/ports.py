@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from src.database.models import Account, BalanceSnapshot, FarmRun, Operation
-from src.market.models import DailyClaim, DailyStatus, GameClaim, Hub
+from src.market.models import DailyClaim, DailyStatus, GameClaim, Hub, Level
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +42,7 @@ class RewardsClient(Protocol):
     def claim_daily(self) -> DailyClaim: ...
     def games(self) -> Hub: ...
     def claim_game(self, game_id: str) -> GameClaim: ...
+    def game_levels(self, game_id: str) -> list[Level]: ...
 
 
 type ClientFactory = Callable[[Path], AbstractContextManager[RewardsClient]]

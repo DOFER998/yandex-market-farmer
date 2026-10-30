@@ -59,7 +59,7 @@ class FarmingService:
                 trigger='read' if read_only else ('games' if target == 'games' else trigger),
             )
             if not read_only and target == 'daily' and account.next_run_at <= now():
-                account.next_run_at = now() + timedelta(minutes=max(360, account.interval_minutes))
+                account.next_run_at = now() + timedelta(minutes=5)
             await self._runs.save(account, run)
             journal = OperationJournal(self._runs, asyncio.get_running_loop(), run)
             execution = FarmingWorker(self.factory, self.session_dir)
@@ -73,7 +73,6 @@ class FarmingService:
             run.finished_at = now()
             if reconcile and read_only and run.state == 'success':
                 account.needs_review = False
-                account.auto_collect = False
             await self._runs.save(account, run)
             if self._changed:
                 self._changed(account_id)

@@ -41,7 +41,7 @@ def test_migrations_repositories_and_cross_connection_lock():
             await db.runs.save(FarmRun(account_id='integration'))
             account = await db.accounts.get('integration')
             assert await db.runs.recover(account)
-            assert (await db.accounts.get('integration')).needs_review
+            assert (await db.accounts.get('integration')).daily_needs_review
             assert (await db.runs.history('integration'))[0].state == 'interrupted'
             # Separate lock managers ensure PostgreSQL, not the in-process lock, excludes us.
             other = AccountLocks(engine)

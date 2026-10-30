@@ -1,4 +1,4 @@
-"""Synthetic contracts reconstructed from Go types; these are NOT captured API replies."""
+"""Synthetic Go contracts plus the explicitly named captured daily-claim fixture."""
 
 import json
 from types import SimpleNamespace
@@ -461,3 +461,34 @@ def test_uncertain_claim_has_safe_reason_without_retries(response, reason, statu
     with pytest.raises(UncertainClaim):
         c.claim_daily()
     assert len(wire.calls) == 3
+
+
+def test_captured_daily_credit_can_return_reward_not_available_after_credit():
+    from pathlib import Path
+
+    body = json.loads((Path(__file__).parent / 'fixtures/daily_claim_received.json').read_text())
+    assert body['result']['shortInfo']['status'] == 'REWARD_NOT_AVAILABLE'
+    c, w = client({'result': {'dailySignInInfo': {'rewardAvailable': True}}}, body, claims=True)
+    result = c.claim_daily()
+    assert result.state == 'claimed'
+    assert result.amount == 10
+    assert result.next_reward_at.timestamp() == 1793394000
+    assert len(w.calls) == 3
+
+
+@pytest.mark.parametrize(
+    'reward',
+    [
+        {'type': 'COIN', 'amount': True},
+        {'type': 'COIN', 'amount': -1},
+        {'type': 'COUPON', 'amount': 10},
+        {},
+    ],
+)
+def test_daily_reward_ack_does_not_accept_unverified_reward_fields(reward):
+    from pathlib import Path
+
+    body = json.loads((Path(__file__).parent / 'fixtures/daily_claim_received.json').read_text())
+    body['result']['rewardInfo']['reward'] = reward
+    c, _ = client({'result': {'dailySignInInfo': {'rewardAvailable': True}}}, body, claims=True)
+    assert c.claim_daily().state == 'submitted_unverified'

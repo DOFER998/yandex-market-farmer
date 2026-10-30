@@ -12,7 +12,13 @@ from src.services.accounts import AccountService
 from src.services.qr_login import QrLoginService
 from src.services.screens import ScreenService
 from src.views.accounts import connection_text, status_text
-from src.views.qr_login import login_result
+from src.views.qr_login import (
+    login_expired,
+    login_instructions,
+    login_loading,
+    login_result,
+    login_saved,
+)
 
 router = Router(name=__name__)
 
@@ -47,7 +53,7 @@ async def qr_callback(
         if not attempt or attempt.error or attempt.balance is None:
             await screens.show(
                 message,
-                'Попытка входа истекла. Начни подключение заново.',
+                login_expired(screens.icons),
                 connection_keyboard(account, screens.icons),
                 revision,
             )
@@ -58,14 +64,15 @@ async def qr_callback(
         await qr_login.cancel(message.chat.id)
         await screens.show(
             message,
-            'Вход сохранён. Автосбор можно включить в настройках.\n\n'
+            login_saved(screens.icons)
+            + '\n\n'
             + status_text(account, await accounts.latest_run(account.id), screens.icons),
             account_keyboard(account, screens.icons),
             revision,
         )
         return
     await screens.show(
-        message, 'Готовлю QR-код Яндекса…', back_keyboard(account.id, screens.icons), revision
+        message, login_loading(screens.icons), back_keyboard(account.id, screens.icons), revision
     )
     attempt = await qr_login.begin(message.chat.id, account.id)
     try:
@@ -73,9 +80,7 @@ async def qr_callback(
         await screens.show_qr(
             message,
             png,
-            'Подтверди вход приложением Яндекса, отсканировав QR. '
-            'На этом телефоне попробуй кнопку «Открыть Яндекс». '
-            'Ожидаю подтверждение до 5 минут. Пароль боту не нужен.',
+            login_instructions(screens.icons),
             login_keyboard(attempt, screens.icons),
             revision,
         )
@@ -89,6 +94,6 @@ async def qr_callback(
             if result.error
             else login_keyboard(result, screens.icons, ready=True)
         )
-        await screens.show(message, login_result(result), keyboard, revision)
+        await screens.show(message, login_result(result, screens.icons), keyboard, revision)
 
     qr_login.watch(message.chat.id, completed)

@@ -17,7 +17,14 @@ from src.keyboards.accounts import (
 from src.services.accounts import AccountService
 from src.services.screens import ScreenService
 from src.states.account import AccountForm
-from src.views.accounts import connection_text, delete_text, home_text, settings_text, status_text
+from src.views.accounts import (
+    connection_text,
+    delete_text,
+    home_text,
+    name_prompt,
+    settings_text,
+    status_text,
+)
 
 router = Router(name=__name__)
 
@@ -53,11 +60,8 @@ async def navigation_callback(
         await state.update_data(rename=callback_data.account_id if rename else None)
         await screens.show(
             query.message,
-            '<b>'
-            + ('Новое имя' if rename else 'Добавить аккаунт')
-            + '</b>\n\nОтправь название аккаунта одним сообщением, до 40 символов. '
-            'Например: «Основной» или «Семейный».',
-            back_keyboard(icons=screens.icons),
+            name_prompt(screens.icons, rename=rename),
+            back_keyboard(callback_data.account_id if rename else '_', screens.icons),
             revision,
         )
 

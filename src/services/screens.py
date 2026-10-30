@@ -121,13 +121,15 @@ class ScreenService:
                 return
             media = BufferedInputFile(png, filename='login.png')
             if state.message_id is None:
-                sent = await message.answer_photo(media, caption=caption, reply_markup=keyboard)
+                sent = await message.answer_photo(
+                    media, caption=caption, reply_markup=keyboard, parse_mode=ParseMode.HTML
+                )
                 state.message_id = sent.message_id
             else:
                 await message.bot.edit_message_media(
                     chat_id=message.chat.id,
                     message_id=state.message_id,
-                    media=InputMediaPhoto(media=media, caption=caption),
+                    media=InputMediaPhoto(media=media, caption=caption, parse_mode=ParseMode.HTML),
                     reply_markup=keyboard,
                 )
             state.photo = True

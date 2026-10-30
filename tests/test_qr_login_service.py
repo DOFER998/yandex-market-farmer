@@ -122,3 +122,25 @@ def test_qr_png_is_valid_square_image():
         assert picture.width == picture.height
         assert picture.width > 200
         picture.verify()
+
+
+def test_qr_is_monochrome_with_clear_border_and_no_auth_metadata():
+    from io import BytesIO
+
+    from PIL import Image, ImageChops
+
+    from src.common.utils.qr import qr_png
+
+    link = SecretStr('https://passport.yandex.ru/auth/magic?track_id=private-test-only')
+    with Image.open(BytesIO(qr_png(link))) as image:
+        red, green, blue = image.convert('RGB').split()
+        assert ImageChops.difference(red, green).getbbox() is None
+        assert ImageChops.difference(green, blue).getbbox() is None
+        for strip in (
+            (0, 0, image.width, 48),
+            (0, image.height - 48, image.width, image.height),
+            (0, 0, 48, image.height),
+            (image.width - 48, 0, image.width, image.height),
+        ):
+            assert image.crop(strip).convert('L').getextrema() == (255, 255)
+        assert not image.info

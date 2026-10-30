@@ -22,6 +22,10 @@ class Account(SQLModel, table=True):
     daily_available: bool | None = None
     next_run_at: datetime = Field(default_factory=now, index=True)
     needs_review: bool = False
+    daily_needs_review: bool = False
+    games_needs_review: bool = False
+    games_review_game: str | None = Field(default=None, max_length=128)
+    daily_review_attempts: int = Field(default=0, ge=0)
     created_at: datetime = Field(default_factory=now)
 
 

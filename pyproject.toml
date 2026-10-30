@@ -1,6 +1,6 @@
 [project]
 name = "yandex-market-farmer"
-version = "0.1.4"
+version = "0.1.5"
 description = "Self-hosted Telegram bot for available Yandex Market rewards"
 readme = "README.md"
 license = "MIT"

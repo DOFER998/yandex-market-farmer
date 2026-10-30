@@ -1,0 +1,79 @@
+{
+  "result": {
+    "shortInfo": {
+      "status": "REWARD_NOT_AVAILABLE",
+      "nextRewardTs": 1793394000
+    },
+    "info": {
+      "plan": [
+        {
+          "title": "Сегодня",
+          "reward": {
+            "type": "COIN",
+            "amount": 10
+          },
+          "received": true
+        },
+        {
+          "title": "2 день",
+          "reward": {
+            "type": "COIN",
+            "amount": 15
+          },
+          "received": false
+        },
+        {
+          "title": "3 день",
+          "reward": {
+            "type": "COIN",
+            "amount": 15
+          },
+          "received": false
+        },
+        {
+          "title": "4 день",
+          "reward": {
+            "type": "COIN",
+            "amount": 20
+          },
+          "received": false
+        },
+        {
+          "title": "5 день",
+          "reward": {
+            "type": "COIN",
+            "amount": 20
+          },
+          "received": false
+        },
+        {
+          "title": "6 день",
+          "reward": {
+            "type": "COIN",
+            "amount": 25
+          },
+          "received": false
+        },
+        {
+          "title": "7 день",
+          "reward": {
+            "type": "COIN",
+            "amount": 25
+          },
+          "received": false
+        }
+      ],
+      "rewardAvailable": false,
+      "nextRewardTs": 1793394000,
+      "subscription": {
+        "enabled": false
+      }
+    },
+    "rewardInfo": {
+      "reward": {
+        "type": "COIN",
+        "amount": 10
+      }
+    }
+  }
+}

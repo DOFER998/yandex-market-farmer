@@ -58,7 +58,8 @@ class DailyStatus(Model):
 
 
 class DailyClaim(Model):
-    state: Literal['unavailable', 'submitted_unverified']
+    amount: int | None = Field(default=None, ge=0)
+    state: Literal['unavailable', 'submitted_unverified', 'claimed']
     next_reward_at: datetime | None = Field(default=None, exclude=True)
 
 

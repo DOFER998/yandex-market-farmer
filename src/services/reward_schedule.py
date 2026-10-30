@@ -38,3 +38,22 @@ def schedule_daily(
     else:
         # Missing or stale deadline is not permission to guess a daily reset.
         account.next_run_at = current + timedelta(minutes=max(360, account.interval_minutes))
+
+
+def defer_daily_review(account: Account) -> None:
+    """Retry only a status read, with persisted exponential backoff (5 min .. 6 h)."""
+    account.daily_needs_review = True
+    account.daily_review_attempts += 1
+    delay = min(300 * 2 ** min(account.daily_review_attempts - 1, 7), 21600)
+    account.next_run_at = now() + timedelta(seconds=delay)
+
+
+def review_daily(account: Account, status: DailyStatus) -> bool:
+    if status.available:
+        # Availability alone does not prove a timed-out claim was rejected.
+        defer_daily_review(account)
+        return False
+    account.daily_needs_review = False
+    account.daily_review_attempts = 0
+    schedule_daily(account, status)
+    return True
