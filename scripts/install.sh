@@ -6,8 +6,7 @@ set -Eeuo pipefail
 
 DEFAULT_REPO=DOFER998/yandex-market-farmer
 
-# Keep the UI on stdout and command output in a private per-run log.
-INSTALL_LOG=''
+# Command output stays in memory and is shown only on failure.
 STEP_PID=''
 ACTIVE_STEP=''
 COLOR='' GREEN='' RED='' RESET=''
@@ -23,36 +22,39 @@ init_ui() {
 log() { printf '  · %s\n' "$*"; }
 die() { printf '\n%s  ✗ %s%s\n' "$RED" "$*" "$RESET" >&2; exit 1; }
 
-init_install_log() {
-    install -d -m 0700 /var/log/ymf
-    INSTALL_LOG=$(mktemp /var/log/ymf/install-XXXXXXXX.log)
-    chmod 600 "$INSTALL_LOG"
-}
-
 run_step() {
-    local title=$1 started=$SECONDS status
+    local title=$1 started=$SECONDS status output saved_error_trap
     shift
     ACTIVE_STEP=$title
-    printf '  … %s\n' "$title"
-    # Do not invoke this function inside an if/||: that disables Bash errexit.
-    # Each command/function runs with errexit; wait is checked separately.
-    (
-        trap - ERR
-        set -e
-        "$@"
-    ) >> "${INSTALL_LOG:-/dev/null}" 2>&1 &
-    STEP_PID=$!
-    while kill -0 "$STEP_PID" 2>/dev/null; do
-        if [[ -t 1 ]]; then
-            printf '\r\033[2K  … %s · %ss' "$title" "$((SECONDS - started))"
-        fi
-        sleep 1
-    done
-    if wait "$STEP_PID"; then status=0; else status=$?; fi
-    STEP_PID=''
-    [[ ! -t 1 ]] || printf '\r\033[2K'
+    if [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
+        printf '  … %s' "$title"
+        (
+            trap - EXIT ERR INT TERM
+            while true; do
+                sleep 1
+                printf '\r\033[2K  … %s · %ss' "$title" "$((SECONDS - started))"
+            done
+        ) &
+        STEP_PID=$!
+    fi
+    # Capture in memory, keeping errexit enabled inside command functions.
+    # An `if output=$(...)` would silently disable it inside those functions.
+    saved_error_trap=$(trap -p ERR)
+    trap - ERR
+    set +e
+    output=$(set -e; "$@" 2>&1)
+    status=$?
+    set -e
+    [[ -z "$saved_error_trap" ]] || eval "$saved_error_trap"
+    if [[ -n "$STEP_PID" ]]; then
+        kill "$STEP_PID" 2>/dev/null || true
+        wait "$STEP_PID" 2>/dev/null || true
+        STEP_PID=''
+        printf '\r\033[2K'
+    fi
     if ((status != 0)); then
         printf '%s  ✗ %s · %ss%s\n' "$RED" "$title" "$((SECONDS - started))" "$RESET" >&2
+        [[ -z "$output" ]] || printf '%s\n' "$output" >&2
         return "$status"
     fi
     printf '%s  ✓ %s · %ss%s\n' "$GREEN" "$title" "$((SECONDS - started))" "$RESET"
@@ -62,13 +64,12 @@ run_step() {
 installation_failed() {
     local status=$1
     trap - ERR
-    if [[ "$ACTIVE_STEP" == 'Миграция БД и запуск бота' && -n "$INSTALL_LOG" ]]; then
-        docker compose logs --no-color --tail=100 migrate bot >> "$INSTALL_LOG" 2>&1 || true
+    if [[ "$ACTIVE_STEP" == 'Миграция БД и запуск бота' ]]; then
+        docker compose logs --no-color --tail=100 migrate bot >&2 || true
     fi
     printf '\n%s  Установка не завершена%s\n' "$RED" "$RESET" >&2
     [[ -z "$ACTIVE_STEP" ]] || printf '  Этап: %s\n' "$ACTIVE_STEP" >&2
     printf '  Данные сохранены.\n' >&2
-    [[ -z "$INSTALL_LOG" ]] || printf '  Подробности: less %s\n' "$INSTALL_LOG" >&2
     exit "$status"
 }
 
@@ -309,7 +310,6 @@ main() {
     exec 9>/run/lock/ymf-install.lock
     flock -n 9 || die 'Другой установщик уже работает'
     init_ui
-    init_install_log
     install_dependencies
     guard_existing_stack "$target"
     prepare_runtime "$repo" "$version" "$target"
@@ -344,7 +344,6 @@ main() {
     printf '  Откройте бота → Добавить аккаунт → Войти через QR\n\n'
     printf '  Каталог  %s\n' "$target"
     printf '  Логи     cd %s && docker compose logs -f bot\n' "$target"
-    printf '  Установка  %s\n\n' "$INSTALL_LOG"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

@@ -119,7 +119,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yandex-market-farme
 скачает готовый образ из GHCR и запустит стек. **Исходники, Git и сборка на VPS не нужны.**
 На сервере Compose сохраняется как `docker-compose.yml`: команды `docker compose up -d`
 и `docker compose logs -f bot` работают без `-f`. Вывод установки компактный,
-подробности сохраняются в закрытом логе `/var/log/ymf/`.
+подробности выводятся в терминал только при ошибке; логи установки не сохраняются.
 Образ поддерживает `linux/amd64` и `linux/arm64`; в `.env` фиксируется точный digest релиза.
 
 [Полная инструкция](docs/deployment.md): установка, управление, обновление и резервные копии.

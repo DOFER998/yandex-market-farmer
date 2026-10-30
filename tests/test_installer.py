@@ -195,44 +195,38 @@ def test_runtime_repair_leaves_custom_tmpfs_untouched(tmp_path):
     assert not compose.with_suffix('.yml.before-tmpfs-fix').exists()
 
 
-def test_step_hides_command_output_but_keeps_private_diagnostics(tmp_path):
-    report = tmp_path / 'install.log'
+def test_step_prints_one_result_without_saving_output(tmp_path):
     result = shell(
-        'umask 077; INSTALL_LOG="$1"; '
-        'work() { printf "verbose docker output\\n"; printf "detail\\n" >&2; }; '
-        'run_step "Загрузка образов" work',
-        str(report),
+        'cd "$1"; work() { printf "verbose output"; }; run_step "Загрузка образов" work',
+        str(tmp_path),
     )
     assert result.returncode == 0, result.stderr
+    assert result.stdout.count('Загрузка образов') == 1
     assert '✓ Загрузка образов' in result.stdout
-    assert 'verbose docker output' not in result.stdout + result.stderr
-    assert 'verbose docker output' in report.read_text()
-    assert 'detail' in report.read_text()
-    assert report.stat().st_mode & 0o777 == 0o600
+    assert 'verbose output' not in result.stdout + result.stderr
+    assert list(tmp_path.iterdir()) == []
     assert '\x1b' not in result.stdout
 
 
-def test_failed_step_stops_function_and_does_not_report_success(tmp_path):
-    report = tmp_path / 'install.log'
+def test_failed_step_shows_error_and_stops_without_saving_output(tmp_path):
     result = shell(
-        'INSTALL_LOG="$1"; '
-        'work() { printf "migration failed\\n"; return 42; printf "must not execute"; }; '
+        'cd "$1"; work() { printf "migration failed\\n"; return 42; '
+        'printf "must not execute"; }; '
         'run_step "Миграция" work; printf "must not continue"',
-        str(report),
+        str(tmp_path),
     )
     assert result.returncode == 42
     assert '✗ Миграция' in result.stderr
+    assert 'migration failed' in result.stderr
     assert '✓' not in result.stdout
-    assert 'must not' not in result.stdout + report.read_text()
+    assert 'must not' not in result.stdout + result.stderr
+    assert list(tmp_path.iterdir()) == []
 
 
-def test_inner_failure_cannot_be_hidden_by_later_success(tmp_path):
-    result = shell(
-        'INSTALL_LOG="$1"; work() { false; printf "must not execute"; }; run_step "Проверка" work',
-        str(tmp_path / 'install.log'),
-    )
+def test_inner_failure_cannot_be_hidden_by_later_success():
+    result = shell('work() { false; printf "must not execute"; }; run_step "Проверка" work')
     assert result.returncode != 0
-    assert 'must not' not in (tmp_path / 'install.log').read_text()
+    assert 'must not' not in result.stdout + result.stderr
 
 
 def test_existing_compose_is_renamed_without_changing_content(tmp_path):
