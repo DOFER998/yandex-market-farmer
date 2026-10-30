@@ -3,7 +3,7 @@ from aiogram.types import CallbackQuery, Message
 
 from src.callback_data.account import AccountAction as Action
 from src.callback_data.account import AccountCallback
-from src.keyboards.accounts import account_keyboard, loading_keyboard
+from src.keyboards.accounts import back_keyboard, loading_keyboard
 from src.services.accounts import AccountService
 from src.services.farming import FarmingService
 from src.services.screens import ScreenService
@@ -48,4 +48,4 @@ async def farming_callback(
     text = f'<b>{account_name(account)}</b>\n\n{result}'
     if callback_data.action == Action.RESUME and run.state == 'success':
         text += '\n\nВход проверен. Автосбор можно включить в настройках.'
-    await screens.show(query.message, text, account_keyboard(account, screens.icons), revision)
+    await screens.show(query.message, text, back_keyboard(account.id, screens.icons), revision)
