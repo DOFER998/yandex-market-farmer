@@ -2,7 +2,7 @@ name: Publish
 
 on:
   push:
-    branches: [dev]
+    branches: [main, dev]
     tags: ['v*']
 
 permissions:

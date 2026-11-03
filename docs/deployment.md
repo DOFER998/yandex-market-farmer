@@ -23,7 +23,7 @@ sudo bash -c 'bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yande
 
 1. Docker Engine и Compose из официального APT-репозитория, если Docker ещё не установлен.
 2. curl, jq, OpenSSL и сертификаты; Git, make, Python, uv и Buildx не требуются.
-3. **Только Compose и digest образа** из последнего стабильного GitHub Release.
+3. **Только Compose** из последнего стабильного GitHub Release и образ канала `:main`.
 4. Системный пользователь `ymf` без входа в shell, приватная конфигурация и каталог сессий.
 5. Готовый образ приложения из GHCR и PostgreSQL из Docker Hub; миграции и запуск с healthcheck.
 
@@ -33,7 +33,7 @@ sudo bash -c 'bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yande
 ```text
 /opt/yandex-market-farmer/
 ├── docker-compose.yml
-├── .env                       # токен, ID, пароль БД, UID/GID и YMF_IMAGE с digest
+├── .env                       # токен, ID, пароль БД, UID/GID и YMF_IMAGE с каналом или версией
 ├── .ymf-install               # служебная отметка версии
 └── .secrets/accounts/          # сессии Яндекса
 ```
@@ -73,7 +73,7 @@ Docker управляет собственными сетевыми правил
 bash <(curl -fsSL https://raw.githubusercontent.com/DOFER998/yandex-market-farmer/main/scripts/install.sh) --version v0.1.1
 ```
 
-Повторный запуск сохраняет существующие Compose, `.env`, cookies, БД и выбранный digest.
+Повторный запуск сохраняет существующие Compose, `.env`, cookies, БД и выбранный образ.
 Известная ошибка `tmpfs` в Compose v0.1.0 исправляется автоматически с резервной копией `.before-tmpfs-fix`; остальные настройки сохраняются.
 Это восстановление установки, **не обновление версии**. Старую установку со сборкой из исходников
 скрипт автоматически не перезаписывает: сначала сделайте резервную копию, перенесите Compose
@@ -91,17 +91,29 @@ docker compose down           # данные сохраняются
 
 ## Обновление готового образа
 
-Сначала сделайте резервную копию. На странице нужного [релиза](https://github.com/DOFER998/yandex-market-farmer/releases)
-скачайте `docker-compose.prod.yml` и `image.ref`. Первый сохраните на сервере как `docker-compose.yml`; содержимое второго
-становится значением `YMF_IMAGE` в существующем `.env`. Не заменяйте остальные настройки `.env`.
-Compose и digest должны быть из **одного релиза**.
+Обычная установка использует `YMF_IMAGE=ghcr.io/dofer998/yandex-market-farmer:main`.
+Канал `:main` обновляется после успешных проверок основной ветки, `:dev` — ветки разработки.
+Для фиксации версии используйте `:0.2.0` или digest из `image.ref`.
+
+Для перехода старой установки с digest на канал выполните один раз:
 
 ```bash
-docker compose config --quiet
-docker compose pull
-docker compose stop bot
-docker compose up -d --no-build --wait --wait-timeout 180
+cd /opt/yandex-market-farmer
+cp -p .env .env.before-channel
+sed -i 's|^YMF_IMAGE=.*|YMF_IMAGE=ghcr.io/dofer998/yandex-market-farmer:main|' .env
 ```
+
+Дальнейшие обновления (предварительно сохраните резервную копию данных):
+
+```bash
+docker compose pull &&
+docker compose stop bot &&
+docker compose up -d --no-build --wait --wait-timeout 180 &&
+docker compose logs --tail=100 -f bot
+```
+
+Миграции выполняются зависимым сервисом перед запуском бота. Если релиз меняет сам
+Compose или обязательные настройки, примените инструкции релиза: pull обновляет только образ.
 
 При ошибке миграции бот остаётся остановленным. Смена образа не откатывает схему БД:
 для несовместимого отката нужна согласованная резервная копия. Не выполняйте downgrade вслепую.

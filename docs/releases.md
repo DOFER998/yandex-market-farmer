@@ -27,6 +27,7 @@ Prerelease-теги пока не поддерживаются; тестовые
 |---|---|---|
 | PR в `main` / `dev` | Ruff, pytest, PostgreSQL, Compose, Docker smoke | Нет |
 | Push в `main` | Те же проверки | Нет |
+| Push в `main` | Те же проверки через reusable CI | `:main`, `:sha-<full commit>` |
 | Push в `dev` | Те же проверки через reusable CI | `:dev`, `:sha-<full commit>` |
 | Push тега `vX.Y.Z` | Валидация тега + те же проверки | `:X.Y.Z`, `:sha-<full commit>`, GitHub Release |
 
