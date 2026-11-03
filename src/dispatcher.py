@@ -5,6 +5,7 @@ from src.middlewares.errors import error_handler
 from src.middlewares.updates import UpdateTasks
 from src.routers import include_routers
 from src.services.accounts import AccountService
+from src.services.bonus import BonusService
 from src.services.emoji import EmojiCatalog
 from src.services.farming import FarmingService
 from src.services.qr_login import QrLoginService
@@ -16,6 +17,7 @@ def create_dispatcher(
     accounts: AccountService,
     farming: FarmingService,
     owner_id: int,
+    bonus: BonusService | None = None,
     screens: ScreenService | None = None,
     updates: UpdateTasks | None = None,
     qr_login: QrLoginService | None = None,
@@ -24,6 +26,7 @@ def create_dispatcher(
         accounts=accounts,
         qr_login=qr_login,
         farming=farming,
+        bonus=bonus,
         screens=screens or ScreenService(EmojiCatalog()),
         fsm_strategy=FSMStrategy.USER_IN_CHAT,
     )

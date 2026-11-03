@@ -11,8 +11,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.common.config import Environment
+from src.common.time import now
 from src.database.locks import AccountLocks, Busy
-from src.database.models import Account, FarmRun
+from src.database.models import Account, BonusStatus, FarmRun
 from src.database.session import Database
 
 pytestmark = pytest.mark.skipif(
@@ -43,6 +44,29 @@ def test_migrations_repositories_and_cross_connection_lock():
             assert await db.runs.recover(account)
             assert (await db.accounts.get('integration')).daily_needs_review
             assert (await db.runs.history('integration'))[0].state == 'interrupted'
+            status = BonusStatus(
+                account_id='integration',
+                source='live',
+                state='collecting',
+                balance=20,
+                limit=250,
+                next_check_at=now(),
+            )
+            await db.runs.save(status)
+            await db.runs.save(
+                BonusStatus(
+                    account_id='integration',
+                    source='live',
+                    state='limit',
+                    balance=250,
+                    limit=250,
+                    notified_key='limit:0:250',
+                )
+            )
+            stored = await db.runs.bonus_status('integration', 'live')
+            assert stored.state == 'limit' and stored.checked_at.tzinfo is not None
+            assert stored.notified_key == 'limit:0:250'
+            assert (await db.accounts.get('integration')).live_auto
             # Separate lock managers ensure PostgreSQL, not the in-process lock, excludes us.
             other = AccountLocks(engine)
             async with db.locks.guard(schema):

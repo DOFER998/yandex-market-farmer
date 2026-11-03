@@ -13,6 +13,7 @@ LONG_ACTIONS = {
     AccountAction.BALANCE,
     AccountAction.COLLECT,
     AccountAction.COLLECT_GAMES,
+    AccountAction.LIVE_REFRESH,
     AccountAction.RESUME,
     AccountAction.QR_START,
     AccountAction.QR_SAVE,

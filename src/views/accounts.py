@@ -90,6 +90,13 @@ def operation_rows(run: FarmRun, operations: list[Operation]) -> list[str]:
             rows.append('Ежедневная награда сейчас недоступна. Запрос начисления не отправлялся.')
         elif operation.state in ('failed', 'uncertain', 'unconfirmed'):
             rows.append(escape(labels.get(operation.kind, 'Не удалось проверить игровую награду')))
+    completed = sum(
+        op.state == 'completed' and op.kind.startswith('wheel:')
+        for op in operations
+        if op.run_id == run.id
+    )
+    if completed:
+        rows.append(f'Выполнение заданий подтверждено: {completed}.')
     return list(dict.fromkeys(rows))
 
 
@@ -98,9 +105,16 @@ def format_run(
 ) -> str:
     blocks = [
         section(
-            STATES.get(run.state, 'Состояние уточняется'),
+            (
+                'Монеты за эфир пока не начислены'
+                if run.trigger == 'live' and run.state == 'unavailable'
+                else STATES.get(run.state, 'Состояние уточняется')
+            ),
             [
-                row('Тип награды', 'игровая' if run.trigger == 'games' else 'ежедневная')
+                row(
+                    'Тип награды',
+                    {'games': 'игровая', 'live': 'эфир'}.get(run.trigger, 'ежедневная'),
+                )
                 if run.trigger != 'read'
                 else row('Действие', 'проверка баланса'),
                 *run_rows(run),
@@ -112,6 +126,12 @@ def format_run(
     ]
     if run.state == 'unavailable' and not operations:
         blocks.append('Запрос начисления не отправлялся. Дождись следующей награды.')
+    if run.trigger == 'games' and run.state == 'no_rewards':
+        blocks.append(
+            '<i>Проверка игр и поддерживаемых заданий завершена. '
+            'Доступных наград сейчас нет. Отправка результатов уровней и событий '
+            'недельных заданий работает, когда включена в конфигурации бота.</i>'
+        )
     if run.error_code:
         blocks.append(
             section('Что делать', [escape(error_text(run.error_code))], icon='connect', icons=icons)
@@ -271,7 +291,9 @@ def history_text(history: AccountHistory, icons: EmojiCatalog | None = None) -> 
                 'Операция',
                 'проверка баланса'
                 if run.trigger == 'read'
-                else ('игровые награды' if run.trigger == 'games' else 'ежедневная награда'),
+                else {'games': 'игровые награды', 'live': 'эфир'}.get(
+                    run.trigger, 'ежедневная награда'
+                ),
             ),
             row('Результат', STATES.get(run.state, 'Состояние уточняется')),
             *run_rows(run),

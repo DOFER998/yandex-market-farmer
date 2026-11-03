@@ -8,3 +8,6 @@ from src.common.config.types.base import BaseTypeConfig
 class MarketTypeConfig(BaseTypeConfig):
     session_dir: Path = Path('.secrets/accounts')
     interval_seconds: float = Field(default=2, ge=1, le=3600)
+    submit_game_results: bool = False
+    auto_games: bool = False
+    auto_live: bool = False

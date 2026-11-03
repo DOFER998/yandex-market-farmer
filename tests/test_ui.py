@@ -384,3 +384,50 @@ def test_qr_photo_is_removed_before_returning_to_text_menu():
         assert not screens._chats[123].photo
 
     asyncio.run(scenario())
+
+
+def test_existing_qr_after_restart_is_recognized_as_photo():
+    from types import SimpleNamespace
+
+    from src.services.emoji import EmojiCatalog
+    from src.services.screens import ScreenService
+
+    message = SimpleNamespace(chat=SimpleNamespace(id=1), message_id=10, photo=[object()])
+    screens = ScreenService(EmojiCatalog())
+    screens.begin(message)
+    assert screens._chats[1].photo is True
+
+
+def test_qr_recreates_deleted_message():
+    import asyncio
+    from types import SimpleNamespace
+
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import EditMessageMedia
+    from aiogram.types import InlineKeyboardMarkup
+
+    from src.services.emoji import EmojiCatalog
+    from src.services.screens import ScreenService
+
+    async def scenario():
+        class Bot:
+            async def edit_message_media(self, **kwargs):
+                raise TelegramBadRequest(
+                    method=EditMessageMedia(**kwargs), message='message to edit not found'
+                )
+
+        async def answer_photo(*args, **kwargs):
+            return SimpleNamespace(message_id=99)
+
+        message = SimpleNamespace(
+            chat=SimpleNamespace(id=1), message_id=10, bot=Bot(), answer_photo=answer_photo
+        )
+        screens = ScreenService(EmojiCatalog())
+        revision = screens.begin(message)
+        await screens.show_qr(
+            message, b'png', 'QR', InlineKeyboardMarkup(inline_keyboard=[]), revision
+        )
+        assert screens._chats[1].message_id == 99
+        assert screens._chats[1].photo
+
+    asyncio.run(scenario())

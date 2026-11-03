@@ -30,6 +30,9 @@ def test_unknown_game_claim_cannot_disable_daily_and_is_not_replayed(tmp_path):
             def balance(self):
                 return 30
 
+            def wheel_missions(self):
+                return []
+
             def games(self):
                 return Hub(games=[Game(game_id='ballz', token='fake')], missions=[])
 
@@ -40,8 +43,7 @@ def test_unknown_game_claim_cannot_disable_daily_and_is_not_replayed(tmp_path):
                         level='RESULT_LEVEL_BRONZE',
                         requiredScore=100,
                         rewardPoints=5,
-                        isAchieved=True,
-                        achievedToken='fake' if claimable else '',
+                        isAchieved=not claimable,
                     )
                 ]
 
@@ -135,7 +137,7 @@ def test_recover_scopes_interrupted_games_and_ignores_read_only_runs(tmp_path):
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
         db = Database(engine)
-        for trigger in ('games', 'read'):
+        for trigger in ('games', 'read', 'live'):
             account = Account(id=trigger, auto_collect=True, auth_state='ready')
             await db.accounts.save(account)
             run = FarmRun(account_id=trigger, trigger=trigger)
@@ -147,6 +149,116 @@ def test_recover_scopes_interrupted_games_and_ignores_read_only_runs(tmp_path):
             assert stored.auto_collect and not stored.needs_review and not stored.daily_needs_review
             assert stored.games_needs_review == (trigger == 'games')
             assert stored.games_review_game == ('ballz' if trigger == 'games' else None)
+        await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_interrupted_mission_preserves_identifier_without_blocking_daily(tmp_path):
+    async def scenario():
+        engine = create_async_engine('sqlite+aiosqlite:///' + str(tmp_path / 'mission.db'))
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+        db = Database(engine)
+        account = Account(id='main', auto_collect=True, auth_state='ready')
+        await db.accounts.save(account)
+        run = FarmRun(account_id='main', trigger='games')
+        await db.runs.save(run)
+        key = 'mission:hexagon_two_towers_5_wheel_november_2026_w2'
+        await db.runs.save(Operation(account_id='main', run_id=run.id, kind=key))
+        await db.runs.recover(account)
+        stored = await db.accounts.get('main')
+        assert stored.games_review_game == key
+        assert stored.games_needs_review
+        assert stored.auto_collect and not stored.daily_needs_review
+        await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_automatic_games_propagate_rate_limit_without_changing_daily(tmp_path):
+    import pytest
+
+    from src.market.errors import RateLimited
+
+    async def scenario():
+        engine = create_async_engine('sqlite+aiosqlite:///' + str(tmp_path / 'rate.db'))
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+        db = Database(engine)
+        account = Account(id='main', auto_collect=True, auth_state='ready')
+        deadline = account.next_run_at
+        await db.accounts.save(account)
+
+        class Client:
+            def check_auth(self):
+                raise RateLimited(86400)
+
+        @contextmanager
+        def factory(_):
+            yield Client()
+
+        service = FarmingService(db.accounts, db.runs, db.locks, tmp_path, factory=factory)
+        with pytest.raises(RateLimited) as error:
+            await service.run('main', target='games', trigger='bonus')
+        assert error.value.retry_after == 86400
+        assert (await db.accounts.get('main')).next_run_at == deadline
+        assert (await db.runs.history('main'))[0].error_code == 'RateLimited'
+        await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_unknown_wheel_task_reconciles_without_replaying_or_reading_game_hub(tmp_path):
+    from src.market.wheel_missions import WheelMission, WheelMissionAttempt
+
+    async def scenario():
+        engine = create_async_engine('sqlite+aiosqlite:///' + str(tmp_path / 'wheel.db'))
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+        db = Database(engine)
+        await db.accounts.save(Account(id='main', auto_collect=True, auth_state='ready'))
+        calls = []
+        completed = False
+
+        class Client:
+            def check_auth(self):
+                pass
+
+            def balance(self):
+                return 20
+
+            def games(self):
+                calls.append('hub')
+                return Hub(games=[], missions=[])
+
+            def wheel_missions(self):
+                calls.append('wheel_read')
+                return [
+                    WheelMission(
+                        mission_id='wheel_open_help_2026_v2',
+                        reward=10,
+                        status='completed' if completed else 'new',
+                    )
+                ]
+
+            def complete_free_wheel_mission(self, mission_id):
+                calls.append('wheel_click')
+                return WheelMissionAttempt(mission_id=mission_id, state='unconfirmed')
+
+        @contextmanager
+        def factory(_):
+            yield Client()
+
+        service = FarmingService(db.accounts, db.runs, db.locks, tmp_path, factory=factory)
+        assert (await service.run('main', target='games')).state == 'uncertain'
+        saved = await db.accounts.get('main')
+        assert saved.games_review_game == 'wheel:wheel_open_help_2026_v2'
+        assert saved.auto_collect and not saved.daily_needs_review
+        completed = True
+        assert (await service.run('main', target='games')).state == 'reconciled'
+        assert calls.count('wheel_click') == 1 and calls.count('hub') == 1
+        assert not (await db.accounts.get('main')).games_needs_review
         await engine.dispose()
 
     asyncio.run(scenario())

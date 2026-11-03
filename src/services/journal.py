@@ -4,8 +4,9 @@ from collections.abc import Callable
 from loguru import logger
 
 from src.database.models import BalanceSnapshot, FarmRun, Operation
-from src.market.errors import UncertainClaim
-from src.market.models import DailyClaim, GameClaim
+from src.market.errors import AuthRequired, UncertainClaim
+from src.market.models import DailyClaim, GameClaim, Hub
+from src.market.wheel_missions import WheelMissionAttempt
 from src.services.ports import Runs
 
 
@@ -40,12 +41,41 @@ class OperationJournal:
                 operation.run_id,
                 kind,
                 operation.error_code,
-                exc.reason.value if isinstance(exc, UncertainClaim) else None,
-                exc.http_status if isinstance(exc, UncertainClaim) else None,
+                str(exc.reason) if isinstance(exc, (AuthRequired, UncertainClaim)) else None,
+                exc.http_status if isinstance(exc, (AuthRequired, UncertainClaim)) else None,
             )
             self._persist(operation)
             raise
-        if isinstance(result, DailyClaim):
+        if isinstance(result, Hub):
+            logger.info(
+                'Game hub: account={} run={} games={} missions={} mission_progress={}',
+                self._run.account_id,
+                self._run.id,
+                len(result.games),
+                len(result.missions),
+                [(m.status, m.accumulated, m.goal) for m in result.missions],
+            )
+        if isinstance(result, GameClaim):
+            logger.info(
+                'Game rewards: account={} run={} stage={} claimed={} unconfirmed={}',
+                self._run.account_id,
+                self._run.id,
+                kind,
+                result.claimed,
+                result.unconfirmed,
+            )
+        if isinstance(result, WheelMissionAttempt):
+            operation.state = result.state
+            logger.info(
+                'Wheel task: account={} run={} stage={} state={} wallet_before={} wallet_after={}',
+                self._run.account_id,
+                self._run.id,
+                kind,
+                result.state,
+                result.balance_before,
+                result.balance_after,
+            )
+        elif isinstance(result, DailyClaim):
             operation.state = result.state
         elif isinstance(result, GameClaim):
             operation.state = (

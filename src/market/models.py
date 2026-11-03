@@ -22,6 +22,7 @@ class Game(Model):
 
 
 class Mission(Model):
+    game_id: str = ''
     mission_id: str
     status: str
     reward: int = Field(ge=0)
@@ -45,7 +46,7 @@ class Level(Model):
     def claim_name(self) -> str | None:
         import re
 
-        if self.isAchieved and self.rewardPoints > 0 and self.achievedToken.get_secret_value():
+        if not self.isAchieved and self.rewardPoints > 0:
             match = re.fullmatch(r'RESULT_LEVEL_([A-Z0-9_]+)', self.level)
             if match:
                 return match[1].lower()

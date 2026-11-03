@@ -48,7 +48,11 @@ def test_operation_result_returns_to_current_account_without_repeating_operation
         buttons = [button for row in result.inline_keyboard for button in row]
         assert len(buttons) == 1
         back = AccountCallback.unpack(buttons[0].callback_data)
-        assert back.action == Action.STATUS
+        assert back.action == (Action.GAMES if action == Action.COLLECT_GAMES else Action.STATUS)
+        if action == Action.COLLECT_GAMES:
+            assert 'Назад к играм' in buttons[0].text
+            farming.run.assert_awaited_once()
+            return
         assert back.account_id == account.id
         assert 'Назад к аккаунту' in buttons[0].text
         await status_callback(query, back, accounts, screens, SimpleNamespace(clear=AsyncMock()))

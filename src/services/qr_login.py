@@ -10,6 +10,7 @@ from loguru import logger
 from pydantic import SecretStr
 
 from src.common.tasks import settle
+from src.common.utils.errors import error_details
 from src.market.client import MarketClient
 from src.market.qr_auth import QrAuth
 from src.market.transport import make_session
@@ -89,11 +90,19 @@ class QrLoginService:
             raise
         except Exception as exc:
             attempt.error = type(exc).__name__
+            logger.warning(
+                'QR login failed: account={} stage={} {}',
+                attempt.account_id,
+                attempt.auth.stage if hasattr(attempt.auth, 'stage') else 'verification',
+                error_details(exc),
+            )
         try:
             await callback(attempt)
-        except Exception:
+        except Exception as exc:
             # A failed UI delivery must not expose auth material or kill polling infrastructure.
-            logger.warning('QR login screen delivery failed')
+            logger.warning(
+                'QR screen delivery failed: account={} {}', attempt.account_id, error_details(exc)
+            )
         if not attempt.error:
             await asyncio.sleep(300)
             attempt.error = 'SessionError'
@@ -101,8 +110,12 @@ class QrLoginService:
             attempt.session.close()
             try:
                 await callback(attempt)
-            except Exception:
-                logger.warning('Expired QR screen delivery failed')
+            except Exception as exc:
+                logger.warning(
+                    'Expired QR screen delivery failed: account={} {}',
+                    attempt.account_id,
+                    error_details(exc),
+                )
         else:
             attempt.session.close()
 

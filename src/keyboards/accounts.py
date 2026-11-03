@@ -59,13 +59,8 @@ def account_keyboard(account: Account, icons: EmojiCatalog | None = None) -> Inl
         builder.add(account_button(text, account.id, action, icons=icons, icon=icon))
     builder.adjust(2)
     builder.row(
-        account_button(
-            'Проверить игровые награды' if account.games_needs_review else 'Игровые награды',
-            account.id,
-            Action.COLLECT_GAMES,
-            icons=icons,
-            icon='collect',
-        )
+        account_button('Игры и задания', account.id, Action.GAMES, icons=icons, icon='games'),
+        account_button('Эфиры', account.id, Action.LIVE, icons=icons, icon='live'),
     )
     if account.needs_review or account.auth_state != 'ready':
         builder.row(
@@ -199,5 +194,56 @@ def delete_keyboard(account_id: str, nonce: int, icons: EmojiCatalog) -> InlineK
                     icon='back',
                 ),
             ]
+        ]
+    )
+
+
+def bonus_keyboard(
+    account: Account, source: str, icons: EmojiCatalog | None = None
+) -> InlineKeyboardMarkup:
+    games = source == 'games'
+    enabled = account.games_auto if games else account.live_auto
+    toggle = (
+        (Action.GAMES_OFF if enabled else Action.GAMES_ON)
+        if games
+        else (Action.LIVE_OFF if enabled else Action.LIVE_ON)
+    )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                account_button(
+                    'Проверить и собрать' if games else 'Обновить статус',
+                    account.id,
+                    Action.COLLECT_GAMES if games else Action.LIVE_REFRESH,
+                    icons=icons,
+                    icon='collect' if games else 'refresh',
+                )
+            ],
+            [
+                account_button(
+                    'Автосбор: ' + ('вкл' if enabled else 'выкл'),
+                    account.id,
+                    toggle,
+                    icons=icons,
+                    icon='settings',
+                )
+            ],
+            [
+                account_button(
+                    'Назад к аккаунту',
+                    account.id,
+                    Action.STATUS,
+                    icons=icons,
+                    icon='back',
+                )
+            ],
+        ]
+    )
+
+
+def games_back_keyboard(account_id: str, icons: EmojiCatalog | None = None) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [account_button('Назад к играм', account_id, Action.GAMES, icons=icons, icon='back')]
         ]
     )

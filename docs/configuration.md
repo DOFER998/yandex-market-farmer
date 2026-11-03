@@ -16,6 +16,9 @@
 | `POSTGRES__PASSWORD` | Пароль БД; сгенерируйте случайное значение |
 | `MARKET__SESSION_DIR` | Каталог cookies; Compose использует `/data/accounts` |
 | `MARKET__INTERVAL_SECONDS` | Ограничение частоты HTTP-запросов; **не интервал автосбора** |
+| `MARKET__SUBMIT_GAME_RESULTS` | Opt-in отправка результатов игр и недельных событий; по умолчанию `false` |
+| `MARKET__AUTO_GAMES` | Фоновые игры и поддерживаемые задания; требует предыдущий флаг, по умолчанию `false` |
+| `MARKET__AUTO_LIVE` | Экспериментальный автосбор эфиров по HTTP; по умолчанию `false` |
 | `APP__DEBUG` | Отладочное логирование, обычно `false` |
 | `APP__HEARTBEAT_FILE` | Файл heartbeat; в контейнере `/tmp/ymf/heartbeat` |
 | `YMF_UID` / `YMF_GID` | UID/GID владельца каталога сессий на Linux |
