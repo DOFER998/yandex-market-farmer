@@ -40,6 +40,9 @@ def test_service_journals_unknown_daily_and_reconciles_without_disabling_autofar
                 calls.append('daily')
                 raise UncertainClaim('private detail')
 
+            def wheel_missions(self):
+                return []
+
             def games(self):
                 calls.append('games')
                 return Hub(games=[], missions=[])
@@ -90,6 +93,9 @@ def test_service_unavailable_daily_does_not_collect_games(tmp_path):
 
             def claim_daily(self):
                 return DailyClaim(state='unavailable')
+
+            def wheel_missions(self):
+                return []
 
             def games(self):
                 raise AssertionError('Daily collection must not request games')
@@ -231,6 +237,9 @@ def test_game_schema_failure_is_partial_and_other_game_can_claim(tmp_path):
 
             def claim_daily(self):
                 return DailyClaim(state='unavailable')
+
+            def wheel_missions(self):
+                return []
 
             def games(self):
                 return Hub(games=[Game(game_id=x, token='secret') for x in ('a', 'b')], missions=[])
@@ -378,6 +387,9 @@ def test_daily_and_games_have_separate_execution_and_schedule(tmp_path):
             def claim_daily(self):
                 calls.append('daily')
                 return DailyClaim(state='unavailable', next_reward_at=deadline)
+
+            def wheel_missions(self):
+                return []
 
             def games(self):
                 calls.append('games')

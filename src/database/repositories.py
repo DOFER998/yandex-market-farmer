@@ -1,11 +1,12 @@
 from collections.abc import Callable
+from datetime import UTC
 
 from sqlalchemy import delete, func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.common.time import now
-from src.database.models import Account, BalanceSnapshot, FarmRun, Operation
+from src.database.models import Account, BalanceSnapshot, BonusStatus, FarmRun, Operation
 from src.services.errors import AccountNotFound
 from src.services.ports import RunStatistics
 from src.services.reward_schedule import defer_daily_review
@@ -36,7 +37,7 @@ class AccountRepository:
     async def delete(self, account_id: str) -> None:
         async with self.session() as session:
             async with session.begin():
-                for model in (Operation, BalanceSnapshot, FarmRun, Account):
+                for model in (Operation, BalanceSnapshot, BonusStatus, FarmRun, Account):
                     column = model.id if model is Account else model.account_id
                     await session.exec(delete(model).where(column == account_id))
 
@@ -45,11 +46,26 @@ class RunRepository:
     def __init__(self, session_factory: SessionFactory) -> None:
         self.session = session_factory
 
-    async def save(self, *rows: Account | FarmRun | Operation | BalanceSnapshot) -> None:
+    async def save(
+        self, *rows: Account | FarmRun | Operation | BalanceSnapshot | BonusStatus
+    ) -> None:
         async with self.session() as session:
             for row in rows:
-                session.add(row)
+                if isinstance(row, BonusStatus):
+                    await session.merge(row)
+                else:
+                    session.add(row)
             await session.commit()
+
+    async def bonus_status(self, account_id: str, source: str) -> BonusStatus | None:
+        async with self.session() as session:
+            row = await session.get(BonusStatus, (account_id, source))
+            if row:
+                for name in ('checked_at', 'next_check_at'):
+                    value = getattr(row, name)
+                    if value is not None and value.tzinfo is None:
+                        setattr(row, name, value.replace(tzinfo=UTC))
+            return row
 
     async def history(self, account_id: str, limit: int = 10) -> list[FarmRun]:
         async with self.session() as session:
@@ -101,13 +117,15 @@ class RunRepository:
                         (
                             op
                             for op in operations
-                            if op.kind.startswith('game:')
+                            if op.kind.startswith(('game:', 'mission:', 'wheel:'))
                             and op.state in ('pending', 'uncertain', 'unconfirmed')
                         ),
                         None,
                     )
-                    account.games_review_game = pending.kind[5:] if pending else None
-                elif run.trigger != 'read':
+                    account.games_review_game = (
+                        pending.kind.removeprefix('game:') if pending else None
+                    )
+                elif run.trigger not in ('read', 'live'):
                     defer_daily_review(account)
             if runs:
                 session.add(account)

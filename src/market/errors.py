@@ -12,7 +12,10 @@ class SessionError(MarketError):
 
 
 class AuthRequired(MarketError):
-    pass
+    def __init__(self, message: str, *, reason='profile_missing', http_status=None):
+        self.reason = reason
+        self.http_status = http_status
+        super().__init__(message)
 
 
 class AccessDenied(MarketError):

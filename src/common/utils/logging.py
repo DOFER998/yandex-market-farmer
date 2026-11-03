@@ -14,7 +14,11 @@ class InterceptHandler(logging.Handler):
             message = f'{record.name}: {record.exc_info[0].__name__}'
         else:
             message = record.getMessage()
-        logger.opt(depth=2).log(record.levelname, message)
+
+        def source(entry):
+            entry.update(name=record.name, function=record.funcName, line=record.lineno)
+
+        logger.patch(source).log(record.levelname, message)
 
 
 def setup_logging(*, debug: bool = False) -> None:

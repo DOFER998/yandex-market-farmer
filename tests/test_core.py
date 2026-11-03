@@ -2,7 +2,6 @@
 
 import json
 from types import SimpleNamespace
-from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -170,24 +169,12 @@ LEVELS = {
 }
 
 
-def test_only_server_earned_levels_claimed():
-    c, w = client(
-        HUB,
-        LEVELS,
-        {'results': [{'data': {'result': {'earned': 'success', 'not-earned': 'success'}}}]},
-        claims=True,
-    )
+def test_game_results_require_explicit_opt_in_and_never_use_removed_bulk_resolver():
+    c, w = client(HUB, LEVELS, claims=True)
     result = c.claim_game('test')
-    assert result.claimed == ['bronze']
-    assert result.unconfirmed == []
-    payload = w.calls[-1][2]['json']
-    assert payload['params'] == [{'gameId': 'test', 'levels': ['bronze']}]
-    for _, url, kw in w.calls:
-        assert not any(x in url for x in ('Spin', 'ProcessGameResult', 'GameEvent', 'MissionClick'))
-        assert 'score' not in str(kw.get('json', {}))
-    assert parse_qs(urlsplit(w.calls[-1][1]).query)['r'][0].endswith(
-        ':resolveFortuneGameRewardBulk'
-    )
+    assert result.claimed == result.unconfirmed == []
+    assert len(w.calls) == 3
+    assert not any('RewardBulk' in call[1] or 'ProcessGameResult' in call[1] for call in w.calls)
 
 
 def test_hub_reports_progress_without_game_tokens():
@@ -263,21 +250,21 @@ def test_access_denied_stops_subsequent_requests():
 
 
 def test_partial_game_ack_is_reported():
-    c, _ = client(
-        HUB, LEVELS, {'results': [{'data': {'result': {'earned': 'failed'}}}]}, claims=True
-    )
+    wire = Wire(HTML, HUB, LEVELS, LEVELS)
+    c = MarketClient(wire, allow_claims=True, submit_game_results=True, interval=0)
     result = c.claim_game('test')
     assert result.claimed == []
-    assert result.unconfirmed == ['bronze']
+    assert result.unconfirmed == ['gold']
 
 
 def test_unknown_claim_ack_blocks_client():
-    c, w = client(HUB, LEVELS, {}, claims=True)
+    wire = Wire(HTML, HUB, LEVELS, {})
+    c = MarketClient(wire, allow_claims=True, submit_game_results=True, interval=0)
     with pytest.raises(UncertainClaim):
         c.claim_game('test')
     with pytest.raises(UncertainClaim):
         c.balance()
-    assert len(w.calls) == 4
+    assert len(wire.calls) == 4
 
 
 @pytest.mark.parametrize('interval', [float('inf'), float('nan'), -1])
@@ -492,3 +479,87 @@ def test_daily_reward_ack_does_not_accept_unverified_reward_fields(reward):
     body['result']['rewardInfo']['reward'] = reward
     c, _ = client({'result': {'dailySignInInfo': {'rewardAvailable': True}}}, body, claims=True)
     assert c.claim_daily().state == 'submitted_unverified'
+
+
+def test_opt_in_game_result_uses_server_threshold_and_claims_confirmed_levels():
+    from copy import deepcopy
+
+    achieved = deepcopy(LEVELS)
+    achieved['results'][0]['data']['gameStatus']['levels'][1]['isAchieved'] = True
+    wire = Wire(
+        HTML,
+        HUB,
+        LEVELS,
+        achieved,
+        {'results': [{'data': {'result': {'earned': 'success', 'not-earned': 'success'}}}]},
+    )
+    c = MarketClient(wire, allow_claims=True, submit_game_results=True, interval=0)
+    result = c.claim_game('test')
+    assert result.claimed == ['gold']
+    assert len(wire.calls) == 4
+    assert not any('RewardBulk' in call[1] for call in wire.calls)
+    process = wire.calls[3]
+    assert 'ProcessGameResultV2' in process[1]
+    assert process[2]['json']['params'] == [{'gameToken': 'game-secret', 'score': 100}]
+
+
+def test_game_result_unknown_response_blocks_further_mutations():
+    wire = Wire(HTML, HUB, LEVELS, {})
+    c = MarketClient(wire, allow_claims=True, submit_game_results=True, interval=0)
+    with pytest.raises(UncertainClaim):
+        c.claim_game('test')
+    with pytest.raises(UncertainClaim):
+        c.claim_game('test')
+    assert len(wire.calls) == 4
+
+
+def mission_hub(status='MISSION_STATUS_DEFAULT', *, game='jump', mission='jump_enemy_test'):
+    import copy
+
+    hub = copy.deepcopy(HUB)
+    hub['result']['gamesSection']['games'][0]['gameId'] = game
+    item = hub['result']['missionsSection']['missionGroups'][0]['missions'][0]
+    item.update(missionId=mission, status=status, action={'openGameAction': {'gameId': game}})
+    return hub
+
+
+def test_mission_uses_verified_event_and_checks_server_completion():
+    wire = Wire(
+        HTML,
+        mission_hub(),
+        {'results': [{'data': {}}]},
+        {'result': {}},
+        mission_hub('MISSION_STATUS_COMPLETED'),
+    )
+    c = MarketClient(wire, allow_claims=True, interval=0, submit_game_results=True)
+    assert c.claim_mission('jump_enemy_test').claimed == ['jump_enemy_test']
+    event = wire.calls[-2][2]['json']['params']
+    assert event['eventType'] == 'ENEMY_STOMP'
+    assert event['count'] == 1
+
+
+def test_mission_failed_confirmation_is_uncertain_and_never_replayed():
+    wire = Wire(HTML, mission_hub(), {'results': [{'data': {}}]}, {'result': {}}, {})
+    c = MarketClient(wire, allow_claims=True, interval=0, submit_game_results=True)
+    with pytest.raises(UncertainClaim):
+        c.claim_mission('jump_enemy_test')
+    with pytest.raises(UncertainClaim):
+        c.claim_mission('jump_enemy_test')
+    assert len(wire.calls) == 5
+
+
+@pytest.mark.parametrize(
+    'hub',
+    [
+        mission_hub('MISSION_STATUS_COMPLETED'),
+        mission_hub(game='unknown'),
+        mission_hub(mission='unknown_mission'),
+    ],
+)
+def test_unsupported_or_completed_mission_never_submits(hub):
+    wire = Wire(HTML, hub)
+    c = MarketClient(wire, allow_claims=True, interval=0, submit_game_results=True)
+    assert not c.claim_mission(
+        hub['result']['missionsSection']['missionGroups'][0]['missions'][0]['missionId']
+    ).claimed
+    assert len(wire.calls) == 2

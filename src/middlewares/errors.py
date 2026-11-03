@@ -6,6 +6,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, ErrorEvent, Message, TelegramObject
 from loguru import logger
 
+from src.common.utils.errors import error_details
 from src.keyboards.accounts import back_keyboard
 from src.market.errors import MarketError
 from src.services.screens import ScreenService
@@ -26,7 +27,7 @@ class ErrorMiddleware(BaseMiddleware):
             logger.warning('Operation rejected: {}', type(exc).__name__)
             text = escape(str(exc)) if type(exc) is MarketError else error_text(type(exc).__name__)
         except Exception as exc:
-            logger.error('Handler failed: {}', type(exc).__name__)
+            logger.error('Handler failed: {}', error_details(exc))
             text = error_text(type(exc).__name__)
         message = event.message if isinstance(event, CallbackQuery) else event
         if isinstance(message, Message):
@@ -45,5 +46,5 @@ class ErrorMiddleware(BaseMiddleware):
 
 async def error_handler(event: ErrorEvent) -> bool:
     """Last boundary for failures while delivering a handler's response."""
-    logger.error('Telegram handler failed: {}', type(event.exception).__name__)
+    logger.error('Telegram handler failed: {}', error_details(event.exception))
     return True

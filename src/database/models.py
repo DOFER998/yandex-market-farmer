@@ -1,6 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
+from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
 
 from src.common.time import now
@@ -17,6 +18,8 @@ class Account(SQLModel, table=True):
     auth_state: str = Field(default='unknown', max_length=24)
     auto_collect: bool = False
     notifications: bool = True
+    games_auto: bool = True
+    live_auto: bool = True
     interval_minutes: int = Field(default=360, ge=15, le=1440)
     daily_reward_at: datetime | None = None
     daily_available: bool | None = None
@@ -60,3 +63,20 @@ class BalanceSnapshot(SQLModel, table=True):
     run_id: str = Field(foreign_key='farm_runs.id')
     coins: int = Field(ge=0)
     created_at: datetime = Field(default_factory=now, index=True)
+
+
+class BonusStatus(SQLModel, table=True):
+    __tablename__ = 'bonus_status'
+    account_id: str = Field(foreign_key='accounts.id', primary_key=True, max_length=32)
+    source: str = Field(primary_key=True, max_length=16)
+    state: str = Field(default='unknown', max_length=24)
+    checked_at: datetime = Field(
+        default_factory=now, sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+    next_check_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    balance: int | None = None
+    limit: int | None = None
+    remaining_seconds: int | None = None
+    error_code: str | None = Field(default=None, max_length=80)
+    cycle: int = 0
+    notified_key: str | None = Field(default=None, max_length=160)

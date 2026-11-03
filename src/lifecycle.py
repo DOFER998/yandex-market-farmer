@@ -9,6 +9,7 @@ from src.common.config import Environment, get_environment
 from src.common.health import heartbeat
 from src.common.utils import setup_logging
 from src.dispatcher import create_dispatcher
+from src.middlewares.telegram import TelegramResilience
 from src.middlewares.updates import UpdateTasks
 from src.services.emoji import EmojiCatalog
 from src.services.notifications import NotificationService
@@ -27,6 +28,7 @@ async def serve(settings: Environment, app: Application) -> None:
     async with AsyncExitStack() as stack:
         await stack.enter_async_context(app.database.locks.guard('__bot_process__'))
         bot = Bot(settings.bot.get_token())
+        bot.session.middleware(TelegramResilience())
         stack.push_async_callback(bot.session.close)
 
         notifications = NotificationService(bot, settings.bot.owner_id, app.accounts)
@@ -38,6 +40,7 @@ async def serve(settings: Environment, app: Application) -> None:
         dispatcher = create_dispatcher(
             accounts=app.accounts,
             farming=app.farming,
+            bonus=app.bonus,
             owner_id=settings.bot.owner_id,
             screens=ScreenService(icons),
             updates=updates,
@@ -46,6 +49,9 @@ async def serve(settings: Environment, app: Application) -> None:
 
         stack.push_async_callback(scheduler.stop)
         await scheduler.start()
+        if app.bonus:
+            stack.push_async_callback(app.bonus.stop)
+            await app.bonus.start(notifications.report_bonus)
         pulse = asyncio.create_task(heartbeat(settings.app.heartbeat_file))
         stack.push_async_callback(stop_task, pulse)
 

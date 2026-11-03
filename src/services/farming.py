@@ -8,7 +8,8 @@ from loguru import logger
 
 from src.common.tasks import settle
 from src.common.time import now
-from src.database.models import FarmRun
+from src.database.models import BonusStatus, FarmRun
+from src.market.errors import RateLimited
 from src.services.identity import validate_id
 from src.services.journal import OperationJournal
 from src.services.ports import Accounts, ClientFactory, Locks, Runs
@@ -49,9 +50,23 @@ class FarmingService:
         validate_id(account_id)
         async with self._locks.guard(account_id):
             account = await self._accounts.get(account_id)
+            previous = (
+                await self._runs.bonus_status(account_id, 'games') if target == 'games' else None
+            )
+            if (
+                previous
+                and previous.error_code == 'RateLimited'
+                and previous.next_check_at
+                and previous.next_check_at > now()
+            ):
+                raise RateLimited((previous.next_check_at - now()).total_seconds())
             await self._runs.recover(account)
             if not read_only and account.needs_review:
                 return FarmRun(account_id=account_id, state='blocked', error_code='ReviewRequired')
+            if trigger == 'bonus' and (
+                not account.auto_collect or not account.games_auto or account.auth_state != 'ready'
+            ):
+                return FarmRun(account_id=account_id, state='skipped')
             if trigger == 'schedule' and (not account.auto_collect or account.next_run_at > now()):
                 return FarmRun(account_id=account_id, state='skipped')
             run = FarmRun(
@@ -66,7 +81,7 @@ class FarmingService:
             worker = asyncio.create_task(
                 asyncio.to_thread(execution.execute, account, run, journal, read_only)
             )
-            _, cancelled = await settle(worker)
+            cooldown, cancelled = await settle(worker)
             if cancelled:
                 # Leave durable run as running; next acquisition requires reconciliation.
                 raise asyncio.CancelledError
@@ -74,6 +89,16 @@ class FarmingService:
             if reconcile and read_only and run.state == 'success':
                 account.needs_review = False
             await self._runs.save(account, run)
+            if target == 'games':
+                status = BonusStatus(
+                    account_id=account_id,
+                    source='games',
+                    state=run.state,
+                    error_code=run.error_code,
+                    next_check_at=now() + timedelta(seconds=max(1, cooldown or 3600)),
+                    notified_key=previous.notified_key if previous else None,
+                )
+                await self._runs.save(status)
             if self._changed:
                 self._changed(account_id)
             logger.info(
@@ -83,4 +108,6 @@ class FarmingService:
                 run.state,
                 run.error_code,
             )
+            if target == 'games' and cooldown is not None:
+                raise RateLimited(cooldown)
             return run

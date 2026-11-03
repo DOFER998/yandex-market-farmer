@@ -2,6 +2,8 @@ from datetime import timedelta
 from functools import partial
 from pathlib import Path
 
+from loguru import logger
+
 from src.common.time import now
 from src.database.models import Account, FarmRun
 from src.market.errors import (
@@ -14,6 +16,7 @@ from src.market.errors import (
     UncertainClaim,
 )
 from src.market.models import DailyStatus
+from src.market.wheel_missions import FREE_CLICK_MISSIONS
 from src.services.journal import OperationJournal
 from src.services.ports import ClientFactory, RewardsClient
 from src.services.reward_schedule import defer_daily_review, review_daily, schedule_daily
@@ -26,12 +29,18 @@ class FarmingWorker:
 
     def execute(
         self, account: Account, run: FarmRun, journal: OperationJournal, read_only: bool
-    ) -> None:
+    ) -> float | None:
         mutating = False
         try:
             with self._factory(self._session_dir / f'{account.id}.txt') as client:
                 journal.call('auth', client.check_auth)
                 account.auth_state = 'ready'
+                if getattr(client, 'session_refreshed', False):
+                    logger.info(
+                        'Market session refreshed: account={} run={} via=passport/auth/update',
+                        account.id,
+                        run.id,
+                    )
                 run.balance_before = journal.call('balance_before', client.balance)
                 journal.snapshot(run.balance_before)
                 run.state = 'success'
@@ -69,7 +78,7 @@ class FarmingWorker:
             elif isinstance(exc, AccessDenied):
                 account.auth_state = 'blocked'
                 account.auto_collect = False
-            elif isinstance(exc, RateLimited):
+            elif isinstance(exc, RateLimited) and run.trigger != 'games':
                 account.next_run_at = max(
                     account.next_run_at, now() + timedelta(seconds=min(exc.retry_after, 86400 * 30))
                 )
@@ -81,6 +90,8 @@ class FarmingWorker:
                     defer_daily_review(account)
             elif account.daily_needs_review and run.trigger != 'games':
                 defer_daily_review(account)
+            if isinstance(exc, RateLimited):
+                return exc.retry_after
 
     @staticmethod
     def _collect_daily(
@@ -118,12 +129,42 @@ class FarmingWorker:
     def _collect_games(
         client: RewardsClient, account: Account, run: FarmRun, journal: OperationJournal
     ) -> None:
+        if (
+            account.games_needs_review
+            and account.games_review_game
+            and account.games_review_game.startswith('wheel:')
+        ):
+            mission_id = account.games_review_game.removeprefix('wheel:')
+            missions = journal.call('wheel_review', client.wheel_missions)
+            mission = next((m for m in missions if m.mission_id == mission_id), None)
+            if mission and mission.status == 'completed':
+                account.games_needs_review = False
+                account.games_review_game = None
+                run.state = 'reconciled'
+            else:
+                run.state = 'blocked'
+                run.error_code = 'GameReviewRequired'
+            return
         hub = journal.call('games', client.games)
         if account.games_needs_review:
             # Read-only reconciliation. Never repeat unknown claims based on balance alone.
             if not account.games_review_game:
                 run.state = 'blocked'
                 run.error_code = 'GameReviewRequired'
+                return
+            if account.games_review_game.startswith('mission:'):
+                mission_id = account.games_review_game.removeprefix('mission:')
+                mission = next((m for m in hub.missions if m.mission_id == mission_id), None)
+                if mission and mission.status in (
+                    'MISSION_STATUS_COMPLETED',
+                    'MISSION_STATUS_RECEIVED',
+                ):
+                    account.games_needs_review = False
+                    account.games_review_game = None
+                    run.state = 'reconciled'
+                else:
+                    run.state = 'blocked'
+                    run.error_code = 'GameReviewRequired'
                 return
             levels = journal.call(
                 'game_review:' + account.games_review_game[:64],
@@ -151,5 +192,40 @@ class FarmingWorker:
             except ProtocolError:
                 account.games_review_game = None
                 run.state = 'partial'
+        for mission in hub.missions:
+            # The durable operation key must preserve the complete identifier for recovery.
+            if len(mission.mission_id) > 72:
+                run.state = 'partial'
+                continue
+            try:
+                account.games_review_game = 'mission:' + mission.mission_id
+                reward = journal.call(
+                    'mission:' + mission.mission_id,
+                    partial(client.claim_mission, mission.mission_id),
+                )
+                claimed = claimed or bool(reward.claimed)
+                if reward.unconfirmed:
+                    raise UncertainClaim('Unconfirmed mission progress')
+                account.games_review_game = None
+            except ProtocolError:
+                account.games_review_game = None
+                run.state = 'partial'
+        try:
+            missions = journal.call('wheel_missions', client.wheel_missions)
+            for mission in missions:
+                if mission.mission_id not in FREE_CLICK_MISSIONS or mission.status == 'completed':
+                    continue
+                account.games_review_game = 'wheel:' + mission.mission_id
+                result = journal.call(
+                    account.games_review_game,
+                    partial(client.complete_free_wheel_mission, mission.mission_id),
+                )
+                if result.state == 'unconfirmed':
+                    raise UncertainClaim('Unconfirmed wheel mission completion')
+                claimed = claimed or result.state == 'completed'
+                account.games_review_game = None
+        except ProtocolError:
+            account.games_review_game = None
+            run.state = 'partial'
         if not claimed and run.state == 'success':
             run.state = 'no_rewards'

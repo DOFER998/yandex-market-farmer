@@ -196,7 +196,7 @@ def isolated_router_modules():
 
     for package, names in [
         (messages, ('menu', 'accounts', 'fallback')),
-        (callbacks, ('accounts', 'farming', 'history', 'qr_login')),
+        (callbacks, ('accounts', 'bonus', 'farming', 'history', 'qr_login')),
     ]:
         for name in names:
             importlib.reload(importlib.import_module(f'{package.__name__}.{name}'))
