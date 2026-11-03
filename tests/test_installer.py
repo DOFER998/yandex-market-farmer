@@ -244,3 +244,28 @@ def test_existing_default_compose_is_preserved(tmp_path):
     result = shell('cd "$1"; normalize_compose_name', str(tmp_path))
     assert result.returncode == 0
     assert (tmp_path / 'docker-compose.yml').read_text() == 'keep'
+
+
+def test_default_install_uses_main_and_repeat_preserves_channel(tmp_path):
+    result = shell(
+        'download_file() { case "$1" in '
+        '*releases/latest) printf "{}" > "$2" ;; '
+        '*docker-compose.prod.yml) printf "name: ymf-prod\\n" > "$2" ;; '
+        '*image.ref) printf "ghcr.io/dofer998/yandex-market-farmer@sha256:%064d\\n" 0 > "$2" ;; '
+        '*) return 1 ;; esac; }; '
+        'jq() { printf "v0.2.0\\n"; }; '
+        'prepare_runtime "$DEFAULT_REPO" latest "$1"; '
+        'download_file() { return 1; }; '
+        'prepare_runtime "$DEFAULT_REPO" latest "$1"',
+        str(tmp_path / 'runtime'),
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / 'runtime' / '.ymf-install').read_text().splitlines()[2] == (
+        'ghcr.io/dofer998/yandex-market-farmer:main'
+    )
+
+
+@pytest.mark.parametrize('tag', ['main', 'dev'])
+def test_image_channel_is_scoped_to_repository(tag):
+    assert shell('validate_image owner/app "$1"', f'ghcr.io/owner/app:{tag}').returncode == 0
+    assert shell('validate_image owner/app "$1"', f'ghcr.io/other/app:{tag}').returncode != 0

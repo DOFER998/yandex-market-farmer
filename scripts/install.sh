@@ -205,11 +205,12 @@ download_file() {
 validate_image() {
     local expected
     expected="ghcr.io/$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')@sha256:"
+    [[ "$2" == "${expected%@sha256:}:main" || "$2" == "${expected%@sha256:}:dev" ]] && return 0
     [[ "$2" == "$expected"* && "${2#"$expected"}" =~ ^[a-f0-9]{64}$ ]]
 }
 
 prepare_runtime() {
-    local repo=$1 version=$2 target=$3 base
+    local repo=$1 version=$2 target=$3 base channel=''
     [[ ! -L "$target" && ! -L "$target/.ymf-install" ]] || die 'Symlink в каталоге установки запрещён'
     if [[ -f "$target/.ymf-install" ]]; then
         [[ $(head -n 1 "$target/.ymf-install") == image-runtime-v1 ]] || die 'Найдена установка из исходников. Перенос выполняется вручную с сохранением .env и сессий.'
@@ -223,6 +224,7 @@ prepare_runtime() {
     fi
     INSTALL_STAGE=$(mktemp -d "${target}.stage.XXXXXX")
     if [[ "$version" == latest ]]; then
+        channel=main
         download_file "https://api.github.com/repos/$repo/releases/latest" "$INSTALL_STAGE/release.json"
         version=$(jq -er '.tag_name | strings' "$INSTALL_STAGE/release.json")
         rm "$INSTALL_STAGE/release.json"
@@ -235,6 +237,9 @@ prepare_runtime() {
     IMAGE=$(cat "$INSTALL_STAGE/image.ref")
     validate_image "$repo" "$IMAGE" || die 'Релиз должен содержать digest образа выбранного репозитория'
     rm "$INSTALL_STAGE/image.ref"
+    if [[ "$channel" == main ]]; then
+        IMAGE="ghcr.io/$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]'):main"
+    fi
     printf 'image-runtime-v1\n%s\n%s\n' "$version" "$IMAGE" > "$INSTALL_STAGE/.ymf-install"
     chmod 755 "$INSTALL_STAGE"
     chmod 644 "$INSTALL_STAGE/docker-compose.yml"
